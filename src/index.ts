@@ -37,7 +37,14 @@ app.use((_req, _res, next) => {
 
 app.use(errorHandler);
 
-app.listen(PORT, async () => {
-  await warmPool();
-  logger.info(`Server is running on port ${PORT}`);
-});
+if (process.env.VERCEL !== "1") {
+  app.listen(PORT, async () => {
+    await warmPool();
+    logger.info(`Server is running on port ${PORT}`);
+  });
+} else {
+  // On Vercel, warm the pool immediately when the lambda initializes
+  warmPool().catch((err) => logger.error("Failed to warm DB pool:", err));
+}
+
+export default app;
