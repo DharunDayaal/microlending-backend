@@ -15,6 +15,7 @@ import loanRouter from "./routes/loanRoute";
 import reportRouter from "./routes/reportRoute";
 import { warmPool } from "./config/database";
 import { rbacAuth } from "./middleware/rbacAuth";
+import { apiRateLimitConfig } from "./middleware/rateLimiter";
 
 const app = express();
 
@@ -28,6 +29,8 @@ app.use(httpLogger);
 app.use("/health", (_req, res) => {
   successResponse(200, res, null, "Server is healthy");
 });
+
+app.use(apiRateLimitConfig);
 
 app.use("/api/auth", authRouter);
 app.use("/api/users", rbacAuth, userRouter);
