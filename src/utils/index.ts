@@ -5,3 +5,7 @@ export function isPastDue(loan: Loan): boolean {
   dueDate.setDate(dueDate.getDate() + loan.total_weeks * 7);
   return new Date() > dueDate;
 }
+
+export function calculateTotalWeeks(totalMonths: number): number {
+  return Math.round(totalMonths * 4);
+}

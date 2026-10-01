@@ -9,10 +9,12 @@ import {
   logger,
   successResponse,
 } from "./helpers";
+import authRouter from "./routes/authRoute";
 import userRouter from "./routes/userRoute";
 import loanRouter from "./routes/loanRoute";
 import reportRouter from "./routes/reportRoute";
 import { warmPool } from "./config/database";
+import { rbacAuth } from "./middleware/rbacAuth";
 
 const app = express();
 
@@ -27,9 +29,10 @@ app.use("/health", (_req, res) => {
   successResponse(200, res, null, "Server is healthy");
 });
 
-app.use("/api/users", userRouter);
-app.use("/api/loans", loanRouter)
-app.use("/api/reports", reportRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/users", rbacAuth, userRouter);
+app.use("/api/loans", rbacAuth, loanRouter);
+app.use("/api/reports", rbacAuth, reportRouter);
 
 app.use((_req, _res, next) => {
   next(new AppError(404, "Route not found"));
