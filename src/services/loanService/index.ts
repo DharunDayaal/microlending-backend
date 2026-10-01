@@ -10,6 +10,7 @@ import {
   LoanStatus,
   LoanWithSummary,
   RepaymentTrack,
+  RepaymentTrackResponse,
   Weekday,
 } from "../../types/loanTypes";
 import { isPastDue } from "../../utils";
@@ -45,7 +46,7 @@ export async function collectPayment(
   weekNumber: number,
   amountPaid: number,
   user: RequestingUser,
-): Promise<{ track: RepaymentTrack; loan: Loan }> {
+): Promise<{ track: RepaymentTrackResponse; loan: Loan }> {
   return await withTransaction(async (client) => {
     if (amountPaid < 0) {
       throw new AppError(400, "Amount paid must be a positive number");
@@ -97,6 +98,8 @@ export async function collectPayment(
       user.id,
     );
 
+    const remainingBalance = Math.max(updateTrack.target_amount - updateTrack.total_collected, 0)
+
     const totalCollectedForLoan =
       await LoanRepository.sumTotalCollectedForLoanRepo(client, loanId);
 
@@ -109,7 +112,7 @@ export async function collectPayment(
       updatedLoan = { ...loan, status: "OVERDUE" };
     }
 
-    return { track: updateTrack, loan: updatedLoan };
+    return { track: {...updateTrack, remaining_balance: remainingBalance}, loan: updatedLoan };
   });
 }
 
@@ -130,6 +133,10 @@ export async function getLoanById(
     outstanding_amount: outstandingBalance,
     is_overdue:
       loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
+    tracks: loan.tracks.map((track) => ({
+      ...track,
+      remaining_balance: Math.max(track.target_amount - track.total_collected, 0),
+    }))
   };
 }
 
@@ -157,11 +164,15 @@ export async function listLoans(
 export async function listTracks(
   loanId: string,
   user: RequestingUser,
-): Promise<RepaymentTrack[]> {
+): Promise<RepaymentTrackResponse[]> {
   const loan = await LoanRepository.findLoanByIdRepo(loanId);
   if (!loan) throw new AppError(404, "Loan not found");
   assertLoanAccess(loan, user);
-  return LoanRepository.listTracksByLoanIdRepo(loanId);
+  const tracks = await LoanRepository.listTracksByLoanIdRepo(loanId);
+  return tracks.map((track) => ({
+    ...track,
+    remaining_balance: Math.max(track.target_amount - track.total_collected, 0),
+  }));
 }
 
 export async function updateLoanStatus(

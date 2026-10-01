@@ -289,7 +289,7 @@ export async function listLoansRepo(
         COALESCE((SELECT SUM(rt.total_collected) FROM repayment_tracks rt WHERE rt.loan_id = l.id), 0)::int AS total_collected,
         COUNT(*) OVER()::int AS total
       FROM loans l
-      JOIN customer u ON u.id = l.customer_id
+      JOIN customers u ON u.id = l.customer_id
       ${whereClause}
       ORDER BY l.issued_at DESC
       LIMIT $${listValues.length - 1} OFFSET $${listValues.length}
