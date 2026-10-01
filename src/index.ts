@@ -30,6 +30,7 @@ app.use("/health", (_req, res) => {
   successResponse(200, res, null, "Server is healthy");
 });
 
+app.set("trust proxy", 1);
 app.use(apiRateLimitConfig);
 
 app.use("/api/auth", authRouter);
