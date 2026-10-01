@@ -49,6 +49,10 @@ export interface RepaymentTrack {
   is_overdued: boolean;
 }
 
+export interface RepaymentTrackResponse extends RepaymentTrack {
+  remaining_balance: number;
+}
+
 export interface Payment {
   id: string;
   track_id: string;
@@ -62,7 +66,7 @@ export interface LoanWithSummary extends Loan {
   outstanding_amount: number;
   paid_weeks: number;
   partial_weeks: number;
-  tracks: RepaymentTrack[];
+  tracks: RepaymentTrackResponse[];
   is_overdue: boolean;
 }
 

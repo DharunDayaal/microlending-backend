@@ -133,7 +133,6 @@ export function getAllowedRoles(
   method: string,
   path: string,
 ): UserRole[] | null {
-  console.log("Checking allowed roles for method:", method, "and path:", path);
   const rule = rbacRules.find(
     (rule) => rule.method === method && matchPath(rule.path, path),
   );
