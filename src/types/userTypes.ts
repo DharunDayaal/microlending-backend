@@ -4,11 +4,12 @@ export type Week = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 
 
 export interface User {
   id: string;
-  user_name: string;
+  customer_name: string;
   phone_number: string;
   referred_by_id: string | null;
   preferred_payment_day: Week;
   created_at: Date;
+  updated_at: Date;
 }
 
 export interface GetUsersOnWeekdayPayload {
@@ -20,7 +21,7 @@ export interface GetUsersOnWeekdayPayload {
 }
 
 export interface UpdateUserPayload {
-  user_name?: string;
+  customer_name?: string;
   phone_number?: string;
   preferred_payment_day?: Week;
 }
@@ -33,7 +34,8 @@ export interface ListUsersFilters {
 
 export interface UserLoanRow {
   loan_id: string | null;
-  user_id: string | null;
+  customer_id: string | null;
+  issued_by_admin_id: string | null;
   nominal_amount: number | null;
   upfront_fee: number | null;
   disbursed_amount: number | null;

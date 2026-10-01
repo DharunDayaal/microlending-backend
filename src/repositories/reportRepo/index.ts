@@ -57,7 +57,7 @@ export async function getOverdueLoans(): Promise<OverdueLoanRow[]> {
       FROM (
         SELECT
           l.*,
-          u.user_name,
+          u.customer_name,
           u.phone_number,
           COALESCE(c.collected, 0)::int AS total_collected,
           (l.total_payable_amount - COALESCE(c.collected, 0))::int AS outstanding_balance,
@@ -66,7 +66,7 @@ export async function getOverdueLoans(): Promise<OverdueLoanRow[]> {
             (now()::date - (l.issued_at + (l.total_weeks * interval '7 days'))::date)
           )::int AS days_past_due
         FROM loans l
-        JOIN users u ON u.id = l.user_id
+        JOIN customers u ON u.id = l.customer_id
         LEFT JOIN (
           SELECT loan_id, SUM(total_collected) AS collected
           FROM repayment_tracks

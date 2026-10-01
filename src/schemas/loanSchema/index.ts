@@ -1,13 +1,15 @@
 import z from "zod";
 
 export const createLoanSchema = z.object({
-  user_id: z.string().min(1, "User ID is required"),
+  customer_id: z.string().min(1, "User ID is required"),
   nominal_amount: z.number().min(1, "Nominal amount is required"),
   total_months: z
     .number()
     .min(1, "Total months must be greater than 0")
     .optional(),
   issued_at: z.date().optional(),
+  upfront_fee_percentage: z.number().min(0).max(100).optional(),
+  interest_percentage: z.number().min(0).max(100).optional(),
 });
 
 export const collectPaymentSchema = z.object({
@@ -16,8 +18,8 @@ export const collectPaymentSchema = z.object({
 });
 
 export const listLoansQuerySchema = z.object({
-  status: z.enum(["ACTIVE", "OVERDUE", "PAID_OFF", "DEFAULTED"]).optional(),
-  user_id: z.uuid().optional(),
+  status: z.enum(["ACTIVE", "OVERDUE", "PAID_OFF", "DEFAULTED", "CLOSED"]).optional(),
+  customer_id: z.uuid().optional(),
   search: z.string().optional(),
   issued_from: z.coerce.date().optional(),
   issued_to: z.coerce.date().optional(),
@@ -27,7 +29,7 @@ export const listLoansQuerySchema = z.object({
 
 // The PAID_OFF will be handled inside collectPayment, no manual override of status to PAID_OFF is allowed
 export const updateLoanStatusSchema = z.object({
-  status: z.enum(["ACTIVE", "OVERDUE", "DEFAULTED"]),
+  status: z.enum(["ACTIVE", "OVERDUE", "DEFAULTED", "CLOSED"]),
 });
 
 export const collectionsDueQuerySchema = z.object({

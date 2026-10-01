@@ -1,12 +1,18 @@
 import type { Request, Response, NextFunction } from "express";
 import * as ReportService from "../../services/reportService";
-import { successResponse } from "../../helpers";
+import { AppError, successResponse } from "../../helpers";
 
 export async function cashOutstanding(
   req: Request,
   res: Response,
   next: NextFunction,
 ) {
+  if (req.user!.role !== "SUPER_ADMIN") {
+    throw new AppError(
+      403,
+      "You do not have permission to access this resource",
+    );
+  }
   try {
     const report = await ReportService.getCashOutstanding();
 
@@ -26,6 +32,12 @@ export async function earnings(
   res: Response,
   next: NextFunction,
 ) {
+  if (req.user!.role !== "SUPER_ADMIN") {
+    throw new AppError(
+      403,
+      "You do not have permission to access this resource",
+    );
+  }
   try {
     const report = await ReportService.getEarnings();
 
@@ -45,6 +57,12 @@ export async function overdueLoans(
   res: Response,
   next: NextFunction,
 ) {
+  if (req.user!.role !== "SUPER_ADMIN") {
+    throw new AppError(
+      403,
+      "You do not have permission to access this resource",
+    );
+  }
   try {
     const report = await ReportService.getOverdueLoans();
 
@@ -58,4 +76,3 @@ export async function overdueLoans(
     next(error);
   }
 }
-

@@ -1,6 +1,7 @@
 import { withTransaction } from "../../config/database";
 import { AppError } from "../../helpers";
 import * as LoanRepository from "../../repositories/loanRepo";
+import { UserRole } from "../../types/authTypes";
 import {
   CollectionDueLoan,
   CreateLoanPayload,
@@ -13,6 +14,26 @@ import {
 } from "../../types/loanTypes";
 import { isPastDue } from "../../utils";
 
+interface RequestingUser {
+  id: string;
+  role: UserRole;
+}
+
+function assertLoanAccess(loan: Loan, user: RequestingUser): void {
+  if (user.role === "SUPER_ADMIN") {
+    if (loan.issued_by_admin_id !== user.id) {
+      throw new AppError(403, "You don't have access to this loan");
+    }
+  }
+}
+
+export async function isCustomerLoanActive(
+  customerId: string,
+): Promise<boolean> {
+  const loan = await LoanRepository.findActiveLoanByCustomerIdRepo(customerId);
+  return loan !== null;
+}
+
 export async function createLoan(payload: CreateLoanPayload) {
   const result = await LoanRepository.createLoanRepo(payload);
 
@@ -23,6 +44,7 @@ export async function collectPayment(
   loanId: string,
   weekNumber: number,
   amountPaid: number,
+  user: RequestingUser,
 ): Promise<{ track: RepaymentTrack; loan: Loan }> {
   return await withTransaction(async (client) => {
     if (amountPaid < 0) {
@@ -33,6 +55,7 @@ export async function collectPayment(
     if (!loan) {
       throw new AppError(404, "Loan not found");
     }
+    assertLoanAccess(loan, user);
 
     if (loan.status !== "ACTIVE" && loan.status !== "OVERDUE") {
       throw new AppError(
@@ -71,6 +94,7 @@ export async function collectPayment(
       track.id,
       loanId,
       amountPaid,
+      user.id,
     );
 
     const totalCollectedForLoan =
@@ -89,23 +113,35 @@ export async function collectPayment(
   });
 }
 
-export async function getLoanById(id: string): Promise<LoanWithSummary> {
-  const loan = await LoanRepository.findLoanWithDetails(id);
+export async function getLoanById(
+  id: string,
+  user: RequestingUser,
+): Promise<LoanWithSummary> {
+  const loan = await LoanRepository.findLoanWithDetailsRepo(id);
   if (!loan) {
     throw new AppError(404, "Loan not found");
   }
+  assertLoanAccess(loan, user);
 
   const outstandingBalance = loan.total_payable_amount - loan.total_collected;
 
   return {
     ...loan,
     outstanding_amount: outstandingBalance,
-    is_overdue: loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
+    is_overdue:
+      loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
   };
 }
 
-export async function listLoans(filters: ListLoansFilters) {
-  const { rows, total } = await LoanRepository.listLoansRepo(filters);
+export async function listLoans(
+  filters: ListLoansFilters,
+  user: RequestingUser,
+) {
+  const scopedFilters =
+    user.role === "SUPER_ADMIN"
+      ? filters
+      : { ...filters, issued_by_admin_id: user.id };
+  const { rows, total } = await LoanRepository.listLoansRepo(scopedFilters);
 
   const withOverdue = rows.map((row) => ({
     ...row,
@@ -118,13 +154,27 @@ export async function listLoans(filters: ListLoansFilters) {
   return { rows: withOverdue, total };
 }
 
+export async function listTracks(
+  loanId: string,
+  user: RequestingUser,
+): Promise<RepaymentTrack[]> {
+  const loan = await LoanRepository.findLoanByIdRepo(loanId);
+  if (!loan) throw new AppError(404, "Loan not found");
+  assertLoanAccess(loan, user);
+  return LoanRepository.listTracksByLoanIdRepo(loanId);
+}
+
 export async function updateLoanStatus(
   loanId: string,
   status: LoanStatus,
+  user: RequestingUser,
 ): Promise<Loan> {
   const loan = await LoanRepository.findLoanByIdRepo(loanId);
-  if (!loan) {
-    throw new AppError(404, "Loan not found");
+  if (!loan) throw new AppError(404, "Loan not found");
+  assertLoanAccess(loan, user);
+
+  if (loan.status === "PAID_OFF" && status !== "CLOSED") {
+    throw new AppError(400, "A paid-off loan can only be moved to CLOSED");
   }
   return withTransaction(async (client) => {
     await LoanRepository.updateLoanStatusRepo(client, loanId, status);
@@ -132,15 +182,22 @@ export async function updateLoanStatus(
   });
 }
 
-export async function listCollectionsDue(preferredPaymentDay?: Weekday): Promise<CollectionDueLoan[]> {
-  const loans = await LoanRepository.listCollectionsDueRepo(preferredPaymentDay);
+export async function listCollectionsDue(
+  user: RequestingUser,
+  preferredPaymentDay?: Weekday,
+): Promise<CollectionDueLoan[]> {
+  const loans = await LoanRepository.listCollectionsDueRepo(
+    preferredPaymentDay,
+    user.role === "SUPER_ADMIN" ? undefined : user.id,
+  );
 
   return loans.map((loan) => {
     const outstandingBalance = loan.total_payable_amount - loan.total_collected;
     return {
       ...loan,
       outstanding_amount: outstandingBalance,
-      is_overdue: loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
+      is_overdue:
+        loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
     };
   });
 }
@@ -149,16 +206,10 @@ export async function listPayments(
   loanId: string,
   page: number,
   limit: number,
+  user: RequestingUser,
 ) {
-  const [loan, payments] = await Promise.all([
-    LoanRepository.findLoanByIdRepo(loanId),
-    LoanRepository.listPaymentsByLoanIdRepo(loanId, page, limit),
-  ]);
-
-  if (!loan) {
-    throw new AppError(404, "Loan not found");
-  }
-
-  return payments;
+  const loan = await LoanRepository.findLoanByIdRepo(loanId);
+  if (!loan) throw new AppError(404, "Loan not found");
+  assertLoanAccess(loan, user);
+  return LoanRepository.listPaymentsByLoanIdRepo(loanId, page, limit);
 }
-

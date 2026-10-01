@@ -56,7 +56,8 @@ export async function getUserLoans(id: string): Promise<Loan[]> {
     .filter((row) => row.loan_id !== null)
     .map((row) => ({
       id: row.loan_id!,
-      user_id: row.user_id!,
+      customer_id: row.customer_id!,
+      issued_by_admin_id: row.issued_by_admin_id!,
       nominal_amount: row.nominal_amount!,
       upfront_fee: row.upfront_fee!,
       disbursed_amount: row.disbursed_amount!,

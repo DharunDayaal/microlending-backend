@@ -14,8 +14,9 @@ import {
 } from "../../schemas/loanSchema";
 import { CreateLoanPayload } from "../../types/loanTypes";
 import * as LoanService from "../../services/loanService";
+import * as AuthRepository from "../../repositories/authRepo";
 
-const pecentOf = (amount: number, percent: number) =>
+const percentOf = (amount: number, percent: number) =>
   Math.round((amount * percent) / 100);
 
 const calculateTotalWeeks = (totalMonths: number) =>
@@ -27,30 +28,51 @@ export async function createLoan(
   next: NextFunction,
 ) {
   try {
-    const { user_id, nominal_amount, issued_at, total_months } =
-      req.body as CreateLoanSchema;
+    const {
+      customer_id,
+      nominal_amount,
+      issued_at,
+      total_months,
+      upfront_fee_percentage,
+      interest_percentage,
+    } = req.body as CreateLoanSchema;
 
-    const totalMonths = total_months ?? 2.5;
-    const totalWeeks = calculateTotalWeeks(totalMonths);
+    const adminId = req.user!.id;
 
-    const { upfrontFeePercent, interestPercent } = LOAN_CONFIG;
+    const isActive = await LoanService.isCustomerLoanActive(customer_id);
+    if (isActive) {
+      throw new AppError(400, "Customer already has an active loan");
+    }
 
-    const upfrontFee = pecentOf(nominal_amount, upfrontFeePercent);
+    const admin = await AuthRepository.findAdminByIdRepo(adminId);
+    if (!admin) {
+      throw new AppError(404, "Issuing admin not found"); // shouldn't happen — rbacAuth already confirmed this id exists
+    }
+
+    const feePercent =
+      upfront_fee_percentage ?? admin.default_upfront_fee_percentage;
+    const interestPercent =
+      interest_percentage ?? admin.default_interest_percentage;
+    const months = total_months ?? admin.default_total_months;
+    const totalWeeks = calculateTotalWeeks(months);
+
+    const upfrontFee = percentOf(nominal_amount, feePercent);
     const disbursedAmount = nominal_amount - upfrontFee;
     const totalPayableAmount =
-      nominal_amount + pecentOf(nominal_amount, interestPercent);
+      nominal_amount + percentOf(nominal_amount, interestPercent);
     const weeklyPayableAmount = Math.ceil(totalPayableAmount / totalWeeks);
 
     const payload: CreateLoanPayload = {
-      user_id,
+      customer_id,
+      issued_by_admin_id: adminId,
       nominal_amount,
       upfront_fee: upfrontFee,
       disbursed_amount: disbursedAmount,
       total_payable_amount: totalPayableAmount,
       weekly_payable_amount: weeklyPayableAmount,
-      total_months: totalMonths,
+      total_months: months,
       total_weeks: totalWeeks,
-      issued_at: issued_at || new Date(),
+      issued_at: issued_at ?? new Date(),
     };
 
     const loan = await LoanService.createLoan(payload);
@@ -80,6 +102,7 @@ export async function collectPayment(
       req.params.loanId,
       week_number,
       amount_paid,
+      req.user!
     );
 
     successResponse(201, res, response, "Payment collected successfully");
@@ -94,7 +117,7 @@ export async function getLoanById(
   next: NextFunction,
 ) {
   try {
-    const loan = await LoanService.getLoanById(req.params.loanId);
+    const loan = await LoanService.getLoanById(req.params.loanId, req.user!);
     successResponse(200, res, { loan }, "Loan retrieved successfully");
     ``;
   } catch (error) {
@@ -109,7 +132,7 @@ export async function listLoans(
 ) {
   try {
     const filters = res.locals.query as ListLoansQuerySchema;
-    const { rows, total } = await LoanService.listLoans(filters);
+    const { rows, total } = await LoanService.listLoans(filters, req.user!);
     successResponse(
       200,
       res,
@@ -128,7 +151,8 @@ export async function updateLoanStatus(
 ) {
   try {
     const { status } = req.body;
-    const loan = await LoanService.updateLoanStatus(req.params.loanId, status);
+    const user = req.user!;
+    const loan = await LoanService.updateLoanStatus(req.params.loanId, status, user);
     successResponse(200, res, { loan }, "Loan status updated successfully");
   } catch (error) {
     next(error);
@@ -142,7 +166,7 @@ export async function collectionsDue(
 ) {
   try {
     const { preferred_payment_day } = req.query;
-    const loans = await LoanService.listCollectionsDue(preferred_payment_day);
+    const loans = await LoanService.listCollectionsDue(req.user!, preferred_payment_day);
 
     successResponse(
       200,
@@ -163,7 +187,7 @@ export async function listPayments(
   try {
     const { loanId } = request.params;
     const { page, limit } = res.locals.query as ListPaymentsQuerySchema;
-    const { rows, total } = await LoanService.listPayments(loanId, page, limit);
+    const { rows, total } = await LoanService.listPayments(loanId, page, limit, request.user!);
     successResponse(
       200,
       res,

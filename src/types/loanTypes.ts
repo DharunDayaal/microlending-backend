@@ -13,7 +13,8 @@ export type PaymentStatus = "UNPAID" | "PAID" | "PARTIAL";
 
 export interface Loan {
   id: string;
-  user_id: string;
+  customer_id: string;
+  issued_by_admin_id: string;
   nominal_amount: number;
   upfront_fee: number;
   disbursed_amount: number;
@@ -26,7 +27,8 @@ export interface Loan {
 }
 
 export interface CreateLoanPayload {
-  user_id: string;
+  customer_id: string;
+  issued_by_admin_id: string;
   nominal_amount: number;
   upfront_fee: number;
   disbursed_amount: number;
@@ -66,7 +68,8 @@ export interface LoanWithSummary extends Loan {
 
 export interface ListLoansFilters {
   status?: LoanStatus;
-  user_id?: string;
+  customer_id?: string;
+  issued_by_admin_id?: string;
   search?: string;
   issued_from?: Date;
   issued_to?: Date;

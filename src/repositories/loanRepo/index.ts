@@ -23,12 +23,13 @@ export async function createLoanRepo(
   try {
     const result = await client.query(
       `
-        INSERT INTO loans (user_id, nominal_amount, upfront_fee, disbursed_amount, total_payable_amount, weekly_payable_amount, total_months, total_weeks, issued_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO loans (customer_id, issued_by_admin_id, nominal_amount, upfront_fee, disbursed_amount, total_payable_amount, weekly_payable_amount, total_months, total_weeks, issued_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
       `,
       [
-        payload.user_id,
+        payload.customer_id,
+        payload.issued_by_admin_id,
         payload.nominal_amount,
         payload.upfront_fee,
         payload.disbursed_amount,
@@ -105,19 +106,30 @@ export async function findOrCreateTrackForUpdateRepo(
   return existing.rows[0];
 }
 
+export async function findActiveLoanByCustomerIdRepo(
+  customerId: string,
+): Promise<Loan | null> {
+  const result = await getPool().query<Loan>(
+    `SELECT * FROM loans WHERE customer_id = $1 AND status IN ('ACTIVE', 'OVERDUE') LIMIT 1`,
+    [customerId],
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function insertPaymentRepo(
   client: PoolClient,
   trackId: string,
   loanId: string,
   amountPaid: number,
+  collectedByAdminId: string,
 ): Promise<Payment> {
   const result = await client.query(
     `
-      INSERT INTO payments (track_id, loan_id, amount_paid)
-      VALUES ($1, $2, $3)
+      INSERT INTO payments (track_id, loan_id, amount_paid, collected_by_admin_id)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
     `,
-    [trackId, loanId, amountPaid],
+    [trackId, loanId, amountPaid, collectedByAdminId],
   );
 
   return result.rows[0];
@@ -188,7 +200,7 @@ export async function getLoanTotalsRepo(loanId: string): Promise<{
   return result.rows[0];
 }
 
-export async function findLoanWithDetails(
+export async function findLoanWithDetailsRepo(
   id: string,
 ): Promise<LoanDetailRow | null> {
   const result = await getPool().query(
@@ -239,14 +251,14 @@ export async function listLoansRepo(
     values.push(filters.status);
     conditions.push(`l.status = $${values.length}`);
   }
-  if (filters.user_id) {
-    values.push(filters.user_id);
-    conditions.push(`l.user_id = $${values.length}`);
+  if (filters.customer_id) {
+    values.push(filters.customer_id);
+    conditions.push(`l.customer_id = $${values.length}`);
   }
   if (filters.search) {
     values.push(`%${filters.search}%`);
     conditions.push(
-      `(u.user_name ILIKE $${values.length} OR u.phone_number ILIKE $${values.length})`,
+      `(u.customer_name ILIKE $${values.length} OR u.phone_number ILIKE $${values.length})`,
     );
   }
   if (filters.issued_from) {
@@ -256,6 +268,10 @@ export async function listLoansRepo(
   if (filters.issued_to) {
     values.push(filters.issued_to);
     conditions.push(`l.issued_at <= $${values.length}`);
+  }
+  if (filters.issued_by_admin_id) {
+    values.push(filters.issued_by_admin_id);
+    conditions.push(`l.issued_by_admin_id = $${values.length}`);
   }
 
   const whereClause = conditions.length
@@ -268,12 +284,12 @@ export async function listLoansRepo(
     `
       SELECT
         l.*,
-        u.user_name,
+        u.customer_name,
         u.phone_number,
         COALESCE((SELECT SUM(rt.total_collected) FROM repayment_tracks rt WHERE rt.loan_id = l.id), 0)::int AS total_collected,
         COUNT(*) OVER()::int AS total
       FROM loans l
-      JOIN users u ON u.id = l.user_id
+      JOIN customer u ON u.id = l.customer_id
       ${whereClause}
       ORDER BY l.issued_at DESC
       LIMIT $${listValues.length - 1} OFFSET $${listValues.length}
@@ -288,6 +304,7 @@ export async function listLoansRepo(
 
 export async function listCollectionsDueRepo(
   preferredPaymentDay?: Weekday,
+  issuedByAdminId?: string,
 ): Promise<CollectionDueRow[]> {
   const values: unknown[] = [];
   let dayFilter = "";
@@ -296,18 +313,22 @@ export async function listCollectionsDueRepo(
     values.push(preferredPaymentDay);
     dayFilter = `AND u.preferred_payment_day = $1`;
   }
+  if (issuedByAdminId) {
+    values.push(issuedByAdminId);
+    dayFilter += ` AND l.issued_by_admin_id = $${values.length}`;
+  }
 
   const result = await getPool().query(
     `
       SELECT
         l.*,
-        u.user_name,
+        u.customer_name,
         u.phone_number,
         u.preferred_payment_day,
         COALESCE(t.total_collected, 0)::int AS total_collected,
         COALESCE(t.tracks, '[]'::json) AS tracks
       FROM loans l
-      JOIN users u ON u.id = l.user_id
+      JOIN customers u ON u.id = l.customer_id
       LEFT JOIN LATERAL (
         SELECT
           SUM(rt.total_collected) AS total_collected,
@@ -316,7 +337,7 @@ export async function listCollectionsDueRepo(
         WHERE rt.loan_id = l.id
       ) t ON true
       WHERE l.status IN ('ACTIVE', 'OVERDUE') ${dayFilter}
-      ORDER BY u.preferred_payment_day, u.user_name
+      ORDER BY u.preferred_payment_day, u.customer_name
     `,
     values,
   );

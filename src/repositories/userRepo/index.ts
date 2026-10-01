@@ -13,12 +13,12 @@ import {
 export async function createUserRepo(payload: CreateUserSchema): Promise<User> {
   const result = await getPool().query(
     `
-      INSERT INTO users (user_name, phone_number, referred_by_id, preferred_payment_day, created_at)
+      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_at)
       VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, user_name, phone_number, referred_by_id, preferred_payment_day, created_at
+      RETURNING id, customer_name, phone_number, referred_by_id, preferred_payment_day, created_at
     `,
     [
-      payload.user_name,
+      payload.customer_name,
       payload.phone_number,
       payload.referred_by_id,
       payload.preferred_payment_day,
@@ -40,13 +40,13 @@ export async function getUsersOnWeekdayRepo(
   ];
 
   if (payload.search) {
-    whereClause += ` AND user_name ILIKE $4`;
+    whereClause += ` AND customer_name ILIKE $4`;
     values.push(`%${payload.search}%`);
   }
   const result = await getPool().query(
     `
-      SELECT id, user_name, phone_number, referred_by_id, preferred_payment_day, created_at
-      FROM users
+      SELECT id, customer_name, phone_number, referred_by_id, preferred_payment_day, created_at
+      FROM customers
       ${whereClause}
       LIMIT $2 OFFSET $3
     `,
@@ -59,7 +59,7 @@ export async function getUsersOnWeekdayRepo(
 export async function getUserByIdRepo(userId: string): Promise<User | null> {
   const result = await getPool().query(
     `
-      SELECT * FROM users
+      SELECT * FROM customers
       WHERE id = $1
     `,
     [userId],
@@ -72,7 +72,7 @@ export async function checkUserExistsByPhoneNumberRepo(
 ): Promise<boolean> {
   const result = await getPool().query(
     `
-      SELECT 1 FROM users
+      SELECT 1 FROM customers
       WHERE phone_number = $1
     `,
     [phoneNumber],
@@ -87,9 +87,9 @@ export async function updateUserRepo(
   const fields: string[] = [];
   const values: unknown[] = [];
 
-  if (payload.user_name !== undefined) {
-    values.push(payload.user_name);
-    fields.push(`user_name = $${values.length}`);
+  if (payload.customer_name !== undefined) {
+    values.push(payload.customer_name);
+    fields.push(`customer_name = $${values.length}`);
   }
   if (payload.phone_number !== undefined) {
     values.push(payload.phone_number);
@@ -107,7 +107,7 @@ export async function updateUserRepo(
   values.push(userId);
   const result = await getPool().query(
     `
-      UPDATE users SET ${fields.join(", ")}
+      UPDATE customers SET ${fields.join(", ")}
       WHERE id = $${values.length}::uuid
       RETURNING *
     `,
@@ -121,11 +121,11 @@ export async function findLoansByUserIdRepo(userId: string): Promise<UserLoanRow
   const result = await getPool().query(
     `
       SELECT
-        l.id AS loan_id, l.user_id, l.nominal_amount, l.upfront_fee, l.disbursed_amount,
+        l.id AS loan_id, l.customer_id, l.nominal_amount, l.upfront_fee, l.disbursed_amount,
         l.total_payable_amount, l.weekly_payable_amount, l.total_months, l.total_weeks,
         l.status, l.issued_at
-      FROM users u
-      LEFT JOIN loans l ON l.user_id = u.id
+      FROM customers u
+      LEFT JOIN loans l ON l.customer_id = u.id
       WHERE u.id = $1
       ORDER BY l.issued_at DESC
     `,
@@ -141,9 +141,9 @@ export async function findLoansByUserIdRepo(userId: string): Promise<UserLoanRow
 export async function findReferralsByUserIdRepo(userId: string): Promise<(User | null)[] | null> {
   const result = await getPool().query(
     `
-      SELECT r.id, r.user_name, r.phone_number, r.referred_by_id, r.preferred_payment_day, r.created_at
-      FROM users u
-      LEFT JOIN users r ON r.referred_by_id = u.id
+      SELECT r.id, r.customer_name, r.phone_number, r.referred_by_id, r.preferred_payment_day, r.created_at
+      FROM customers u
+      LEFT JOIN customers r ON r.referred_by_id = u.id
       WHERE u.id = $1
       ORDER BY r.created_at DESC
     `,
@@ -164,7 +164,7 @@ export async function listUsersRepo(
 
   if (filters.search) {
     values.push(`%${filters.search}%`);
-    conditions.push(`(user_name ILIKE $${values.length} OR phone_number ILIKE $${values.length})`);
+    conditions.push(`(customer_name ILIKE $${values.length} OR phone_number ILIKE $${values.length})`);
   }
 
   const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -174,7 +174,7 @@ export async function listUsersRepo(
   const result = await getPool().query(
     `
       SELECT *, COUNT(*) OVER()::int AS total
-      FROM users
+      FROM customers
       ${whereClause}
       ORDER BY created_at DESC
       LIMIT $${listValues.length - 1} OFFSET $${listValues.length}
