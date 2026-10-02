@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import {
   PG_FOREIGN_KEY_VIOLATION_ERROR_CODE,
-  LOAN_CONFIG,
   PG_UNIQUE_VIOLATION_ERROR_CODE,
 } from "../../constants";
 import { AppError, successResponse } from "../../helpers";
@@ -44,16 +43,31 @@ export async function createLoan(
       throw new AppError(400, "Customer already has an active loan");
     }
 
-    const admin = await AuthRepository.findAdminByIdRepo(adminId);
-    if (!admin) {
-      throw new AppError(404, "Issuing admin not found"); // shouldn't happen — rbacAuth already confirmed this id exists
+    const requester = await AuthRepository.findAdminByIdRepo(req.user!.id);
+    if (!requester) {
+      throw new AppError(404, "Requesting user not found");
+    }
+
+    let defaultsSource = requester;
+    if (
+      requester.role === "USER" &&
+      requester.default_upfront_fee_percentage === null
+    ) {
+      // No personal override — fall back to the admin they belong to.
+      const managingAdmin = await AuthRepository.findAdminByIdRepo(
+        requester.admin_id!,
+      );
+      if (!managingAdmin) {
+        throw new AppError(404, "Managing admin not found");
+      }
+      defaultsSource = managingAdmin;
     }
 
     const feePercent =
-      upfront_fee_percentage ?? admin.default_upfront_fee_percentage;
+      upfront_fee_percentage ?? defaultsSource.default_upfront_fee_percentage!;
     const interestPercent =
-      interest_percentage ?? admin.default_interest_percentage;
-    const months = total_months ?? admin.default_total_months;
+      interest_percentage ?? defaultsSource.default_interest_percentage!;
+    const months = total_months ?? defaultsSource.default_total_months!;
     const totalWeeks = calculateTotalWeeks(months);
 
     const upfrontFee = percentOf(nominal_amount, feePercent);
@@ -65,6 +79,7 @@ export async function createLoan(
     const payload: CreateLoanPayload = {
       customer_id,
       issued_by_admin_id: adminId,
+      owning_admin_id: req.user!.teamId,
       nominal_amount,
       upfront_fee: upfrontFee,
       disbursed_amount: disbursedAmount,
@@ -81,10 +96,10 @@ export async function createLoan(
     if (
       (error as { code?: string }).code === PG_FOREIGN_KEY_VIOLATION_ERROR_CODE
     ) {
-      next(new AppError(400, "User not found"));
+      return next(new AppError(400, "User not found"));
     }
     if ((error as { code?: string }).code === PG_UNIQUE_VIOLATION_ERROR_CODE) {
-      next(new AppError(400, "User already has an active loan"));
+      return next(new AppError(400, "User already has an active loan"));
     }
     next(error);
   }
@@ -102,7 +117,7 @@ export async function collectPayment(
       req.params.loanId,
       week_number,
       amount_paid,
-      req.user!
+      req.user!,
     );
 
     successResponse(201, res, response, "Payment collected successfully");
@@ -119,7 +134,6 @@ export async function getLoanById(
   try {
     const loan = await LoanService.getLoanById(req.params.loanId, req.user!);
     successResponse(200, res, { loan }, "Loan retrieved successfully");
-    ``;
   } catch (error) {
     next(error);
   }
@@ -152,7 +166,11 @@ export async function updateLoanStatus(
   try {
     const { status } = req.body;
     const user = req.user!;
-    const loan = await LoanService.updateLoanStatus(req.params.loanId, status, user);
+    const loan = await LoanService.updateLoanStatus(
+      req.params.loanId,
+      status,
+      user,
+    );
     successResponse(200, res, { loan }, "Loan status updated successfully");
   } catch (error) {
     next(error);
@@ -166,7 +184,10 @@ export async function collectionsDue(
 ) {
   try {
     const { preferred_payment_day } = req.query;
-    const loans = await LoanService.listCollectionsDue(req.user!, preferred_payment_day);
+    const loans = await LoanService.listCollectionsDue(
+      req.user!,
+      preferred_payment_day,
+    );
 
     successResponse(
       200,
@@ -187,7 +208,12 @@ export async function listPayments(
   try {
     const { loanId } = request.params;
     const { page, limit } = res.locals.query as ListPaymentsQuerySchema;
-    const { rows, total } = await LoanService.listPayments(loanId, page, limit, request.user!);
+    const { rows, total } = await LoanService.listPayments(
+      loanId,
+      page,
+      limit,
+      request.user!,
+    );
     successResponse(
       200,
       res,

@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import * as AuthService from "../../services/authService";
 import { successResponse } from "../../helpers";
 import {
+  CreateEmployeeSchema,
   LoginByEmailSchema,
   LoginByPhoneSchema,
   RefreshTokenSchema,
@@ -10,6 +11,7 @@ import {
   VerifyOtpSchema,
 } from "../../schemas/authSchema";
 import * as OtpService from "../../services/otpService";
+import { RequestingUser } from "../../types/authTypes";
 
 export async function register(
   req: Request,
@@ -105,8 +107,24 @@ export async function refreshTokens(
 export async function logout(req: Request, res: Response, next: NextFunction) {
   try {
     const { refresh_token } = req.body as RefreshTokenSchema;
-    await AuthService.revokeRefreshToken(refresh_token);
+    await AuthService.revokeAllRefreshToken(refresh_token);
     successResponse(200, res, null, "Logged out successfully");
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createEmployee(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const payload = req.body as CreateEmployeeSchema;
+    const creator = req.user! as RequestingUser;
+
+    const employee = await AuthService.createEmployee(payload, creator);
+    successResponse(201, res, { employee }, "Employee created successfully");
   } catch (error) {
     next(error);
   }

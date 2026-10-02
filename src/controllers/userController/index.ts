@@ -16,16 +16,24 @@ export async function createUser(
   try {
     const payload: CreateUserSchema = req.body;
 
-    const user = await UserService.createUser(payload, req.user!.id);
+    if (!payload.created_at) {
+      payload.created_at = new Date();
+    }
+
+    const user = await UserService.createUser(
+      payload,
+      req.user!.id,
+      req.user!.teamId,
+    );
 
     successResponse(201, res, { user }, "User created successfully");
   } catch (error) {
     const code = (error as { code?: string }).code;
     if (code === PG_UNIQUE_VIOLATION_ERROR_CODE) {
-      throw new AppError(409, "Phone number is already registered");
+      return next(new AppError(409, "Phone number is already registered"));
     }
     if (code === PG_FOREIGN_KEY_VIOLATION_ERROR_CODE) {
-      throw new AppError(404, "Referring user not found");
+      return next(new AppError(404, "Referring user not found"));
     }
     next(error);
   }

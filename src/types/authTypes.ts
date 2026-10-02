@@ -1,10 +1,11 @@
-export type UserRole = "ADMIN" | "SUPER_ADMIN";
+export type UserRole = "USER" | "ADMIN" | "SUPER_ADMIN";
 
 export type OtpPurpose = "LOGIN" | "RESET_PASSWORD" | "VERIFY_PHONE_NUMBER";
 
 export interface AccessTokenPayload {
-  userId: string;
+  user_id: string;
   role: UserRole;
+  team_id: string;
 }
 
 export interface AdminUser {
@@ -14,11 +15,12 @@ export interface AdminUser {
   email: string | null;
   password_hash: string;
   role: UserRole;
+  admin_id: string | null;
   is_verified: boolean;
   is_active: boolean;
-  default_upfront_fee_percentage: number;
-  default_interest_percentage: number;
-  default_total_months: number;
+  default_upfront_fee_percentage: number | null;
+  default_interest_percentage: number | null;
+  default_total_months: number | null;
   default_total_weeks: number;
   created_at: Date;
   updated_at: Date;
@@ -71,4 +73,22 @@ export interface RefreshToken {
   expires_at: Date;
   revoked_at: Date | null;
   created_at: Date;
+}
+
+export interface CreateEmployeePayload {
+  user_name: string;
+  phone_number: string;
+  email?: string;
+  password_hash: string;
+  admin_id: string;
+  default_upfront_fee_percentage?: number;
+  default_interest_percentage?: number;
+  default_total_months?: number;
+  default_total_weeks?: number;
+}
+
+export interface RequestingUser {
+  id: string;
+  role: UserRole;
+  teamId: string;
 }

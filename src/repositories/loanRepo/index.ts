@@ -23,13 +23,14 @@ export async function createLoanRepo(
   try {
     const result = await client.query(
       `
-        INSERT INTO loans (customer_id, issued_by_admin_id, nominal_amount, upfront_fee, disbursed_amount, total_payable_amount, weekly_payable_amount, total_months, total_weeks, issued_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO loans (customer_id, issued_by_admin_id, owning_admin_id, nominal_amount, upfront_fee, disbursed_amount, total_payable_amount, weekly_payable_amount, total_months, total_weeks, issued_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *
       `,
       [
         payload.customer_id,
         payload.issued_by_admin_id,
+        payload.owning_admin_id,
         payload.nominal_amount,
         payload.upfront_fee,
         payload.disbursed_amount,
@@ -269,9 +270,9 @@ export async function listLoansRepo(
     values.push(filters.issued_to);
     conditions.push(`l.issued_at <= $${values.length}`);
   }
-  if (filters.issued_by_admin_id) {
-    values.push(filters.issued_by_admin_id);
-    conditions.push(`l.issued_by_admin_id = $${values.length}`);
+  if (filters.owning_admin_id) {
+    values.push(filters.owning_admin_id);
+    conditions.push(`l.owning_admin_id = $${values.length}`);
   }
 
   const whereClause = conditions.length
@@ -304,7 +305,7 @@ export async function listLoansRepo(
 
 export async function listCollectionsDueRepo(
   preferredPaymentDay?: Weekday,
-  issuedByAdminId?: string,
+  owningAdminId?: string,
 ): Promise<CollectionDueRow[]> {
   const values: unknown[] = [];
   let dayFilter = "";
@@ -313,9 +314,9 @@ export async function listCollectionsDueRepo(
     values.push(preferredPaymentDay);
     dayFilter = `AND u.preferred_payment_day = $1`;
   }
-  if (issuedByAdminId) {
-    values.push(issuedByAdminId);
-    dayFilter += ` AND l.issued_by_admin_id = $${values.length}`;
+  if (owningAdminId) {
+    values.push(owningAdminId);
+    dayFilter += ` AND l.owning_admin_id = $${values.length}`;
   }
 
   const result = await getPool().query(

@@ -1,7 +1,11 @@
 import { withTransaction } from "../../config/database";
+import {
+  PG_FOREIGN_KEY_VIOLATION_ERROR_CODE,
+  PG_UNIQUE_VIOLATION_ERROR_CODE,
+} from "../../constants";
 import { AppError } from "../../helpers";
 import * as LoanRepository from "../../repositories/loanRepo";
-import { UserRole } from "../../types/authTypes";
+import { RequestingUser } from "../../types/authTypes";
 import {
   CollectionDueLoan,
   CreateLoanPayload,
@@ -9,22 +13,15 @@ import {
   Loan,
   LoanStatus,
   LoanWithSummary,
-  RepaymentTrack,
   RepaymentTrackResponse,
   Weekday,
 } from "../../types/loanTypes";
 import { isPastDue } from "../../utils";
 
-interface RequestingUser {
-  id: string;
-  role: UserRole;
-}
-
 function assertLoanAccess(loan: Loan, user: RequestingUser): void {
-  if (user.role === "SUPER_ADMIN") {
-    if (loan.issued_by_admin_id !== user.id) {
-      throw new AppError(403, "You don't have access to this loan");
-    }
+  if (user.role === "SUPER_ADMIN") return;
+  if (loan.owning_admin_id !== user.teamId) {
+    throw new AppError(403, "You don't have access to this loan");
   }
 }
 
@@ -35,10 +32,19 @@ export async function isCustomerLoanActive(
   return loan !== null;
 }
 
-export async function createLoan(payload: CreateLoanPayload) {
-  const result = await LoanRepository.createLoanRepo(payload);
-
-  return result;
+export async function createLoan(payload: CreateLoanPayload): Promise<Loan> {
+  try {
+    return await LoanRepository.createLoanRepo(payload);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === PG_FOREIGN_KEY_VIOLATION_ERROR_CODE) {
+      throw new AppError(404, "Customer not found");
+    }
+    if (code === PG_UNIQUE_VIOLATION_ERROR_CODE) {
+      throw new AppError(400, "Customer already has an active loan");
+    }
+    throw error;
+  }
 }
 
 export async function collectPayment(
@@ -76,9 +82,9 @@ export async function collectPayment(
 
     const newTotalCollected = track.total_collected + amountPaid;
     const status =
-      amountPaid >= track.target_amount
+      newTotalCollected >= track.target_amount
         ? "PAID"
-        : amountPaid > 0 && amountPaid < track.target_amount
+        : newTotalCollected > 0
           ? "PARTIAL"
           : "UNPAID";
 
@@ -98,7 +104,10 @@ export async function collectPayment(
       user.id,
     );
 
-    const remainingBalance = Math.max(updateTrack.target_amount - updateTrack.total_collected, 0)
+    const remainingBalance = Math.max(
+      updateTrack.target_amount - updateTrack.total_collected,
+      0,
+    );
 
     const totalCollectedForLoan =
       await LoanRepository.sumTotalCollectedForLoanRepo(client, loanId);
@@ -112,7 +121,10 @@ export async function collectPayment(
       updatedLoan = { ...loan, status: "OVERDUE" };
     }
 
-    return { track: {...updateTrack, remaining_balance: remainingBalance}, loan: updatedLoan };
+    return {
+      track: { ...updateTrack, remaining_balance: remainingBalance },
+      loan: updatedLoan,
+    };
   });
 }
 
@@ -135,8 +147,11 @@ export async function getLoanById(
       loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
     tracks: loan.tracks.map((track) => ({
       ...track,
-      remaining_balance: Math.max(track.target_amount - track.total_collected, 0),
-    }))
+      remaining_balance: Math.max(
+        track.target_amount - track.total_collected,
+        0,
+      ),
+    })),
   };
 }
 
@@ -147,7 +162,7 @@ export async function listLoans(
   const scopedFilters =
     user.role === "SUPER_ADMIN"
       ? filters
-      : { ...filters, issued_by_admin_id: user.id };
+      : { ...filters, owning_admin_id: user.teamId };
   const { rows, total } = await LoanRepository.listLoansRepo(scopedFilters);
 
   const withOverdue = rows.map((row) => ({
@@ -199,7 +214,7 @@ export async function listCollectionsDue(
 ): Promise<CollectionDueLoan[]> {
   const loans = await LoanRepository.listCollectionsDueRepo(
     preferredPaymentDay,
-    user.role === "SUPER_ADMIN" ? undefined : user.id,
+    user.role === "SUPER_ADMIN" ? undefined : user.teamId,
   );
 
   return loans.map((loan) => {

@@ -13,6 +13,7 @@ export interface User {
   id: string;
   customer_name: string;
   created_by: string;
+  owning_admin_id: string;
   phone_number: string;
   referred_by_id: string | null;
   preferred_payment_day: Week;
@@ -26,6 +27,7 @@ export interface GetUsersOnWeekdayPayload {
   startIndex: number;
   weekday: Week;
   search?: string;
+  owningAdminId?: string;
 }
 
 export interface UpdateUserPayload {
@@ -44,6 +46,7 @@ export interface UserLoanRow {
   loan_id: string | null;
   customer_id: string | null;
   issued_by_admin_id: string | null;
+  owning_admin_id: string | null;
   nominal_amount: number | null;
   upfront_fee: number | null;
   disbursed_amount: number | null;

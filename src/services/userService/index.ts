@@ -9,7 +9,7 @@ import {
   findReferralsByUserIdRepo,
 } from "../../repositories/userRepo";
 import { CreateUserSchema } from "../../schemas/userSchema";
-import { UserRole } from "../../types/authTypes";
+import { RequestingUser } from "../../types/authTypes";
 import { Loan } from "../../types/loanTypes";
 import {
   GetUsersOnWeekdayPayload,
@@ -17,25 +17,19 @@ import {
   User,
 } from "../../types/userTypes";
 
-interface RequestingUser {
-  id: string;
-  role: UserRole;
-}
-
-function assertCustomerAccess(
-  customer: User,
-  requestingUser: RequestingUser,
-): void {
-  if (requestingUser.role === "SUPER_ADMIN") {
-    return;
-  }
-  if (customer.created_by !== requestingUser.id) {
+function assertCustomerAccess(customer: User, user: RequestingUser): void {
+  if (user.role === "SUPER_ADMIN") return;
+  if (customer.owning_admin_id !== user.teamId) {
     throw new AppError(403, "You don't have access to this customer's data");
   }
 }
 
-export async function createUser(payload: CreateUserSchema, createdBy: string) {
-  const result = await createUserRepo(payload, createdBy);
+export async function createUser(
+  payload: CreateUserSchema,
+  createdBy: string,
+  owiningAdminId: string,
+) {
+  const result = await createUserRepo(payload, createdBy, owiningAdminId);
 
   return result;
 }
@@ -54,10 +48,10 @@ export async function getUsersOnWeekday(
   user: RequestingUser,
 ) {
   const scopedPayload =
-    user.role === "SUPER_ADMIN" ? payload : { ...payload, createdBy: user.id };
-  const result = await getUsersOnWeekdayRepo(scopedPayload);
-
-  return result;
+    user.role === "SUPER_ADMIN"
+      ? payload
+      : { ...payload, owningAdminId: user.teamId };
+  return getUsersOnWeekdayRepo(scopedPayload);
 }
 
 export async function checkUserExistsByPhoneNumber(phoneNumber: string) {
@@ -100,6 +94,7 @@ export async function getUserLoans(
       id: row.loan_id!,
       customer_id: row.customer_id!,
       issued_by_admin_id: row.issued_by_admin_id!,
+      owning_admin_id: row.owning_admin_id!,
       nominal_amount: row.nominal_amount!,
       upfront_fee: row.upfront_fee!,
       disbursed_amount: row.disbursed_amount!,

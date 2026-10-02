@@ -13,11 +13,12 @@ import {
 export async function createUserRepo(
   payload: CreateUserSchema,
   createdBy: string,
+  owiningAdminId: string,
 ): Promise<User> {
   const result = await getPool().query(
     `
-      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, created_by, owning_admin_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `,
     [
@@ -27,6 +28,7 @@ export async function createUserRepo(
       payload.preferred_payment_day,
       payload.created_at,
       createdBy,
+      owiningAdminId,
     ],
   );
 
@@ -36,23 +38,28 @@ export async function createUserRepo(
 export async function getUsersOnWeekdayRepo(
   payload: GetUsersOnWeekdayPayload,
 ): Promise<User[]> {
-  let whereClause = `WHERE preferred_payment_day = $1`;
-  const values: unknown[] = [
-    payload.weekday,
-    payload.limit,
-    payload.startIndex,
-  ];
+  const conditions: string[] = [`preferred_payment_day = $1`];
+  const values: unknown[] = [payload.weekday];
 
   if (payload.search) {
-    whereClause += ` AND customer_name ILIKE $4`;
     values.push(`%${payload.search}%`);
+    conditions.push(`customer_name ILIKE $${values.length}`);
   }
-  const result = await getPool().query(
+  if (payload.owningAdminId) {
+    values.push(payload.owningAdminId);
+    conditions.push(`owning_admin_id = $${values.length}`);
+  }
+
+  values.push(payload.limit, payload.startIndex);
+  const limitIndex = values.length - 1;
+  const offsetIndex = values.length;
+
+  const result = await getPool().query<User>(
     `
-      SELECT id, customer_name, phone_number, referred_by_id, preferred_payment_day, created_at
+      SELECT id, customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, owning_admin_id, created_by
       FROM customers
-      ${whereClause}
-      LIMIT $2 OFFSET $3
+      WHERE ${conditions.join(" AND ")}
+      LIMIT $${limitIndex} OFFSET $${offsetIndex}
     `,
     values,
   );

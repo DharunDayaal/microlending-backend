@@ -14,19 +14,20 @@ export const publicRoutes: RBACPublicRule[] = [
   { method: "POST", path: "/api/auth/login/phone" },
   { method: "POST", path: "/api/auth/otp/request" },
   { method: "POST", path: "/api/auth/otp/verify" },
+  { method: "POST", path: "/api/auth/refresh" },
 ] as const;
 
 const rbacRules: RBACRule[] = [
   // Auth routes
   {
     method: "POST",
-    path: "/api/auth/refresh",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    path: "/api/auth/create-employee",
+    roles: ["ADMIN"],
   },
   {
     method: "POST",
     path: "/api/auth/logout",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
 
   // Admin routes
@@ -46,47 +47,59 @@ const rbacRules: RBACRule[] = [
   {
     method: "GET",
     path: "/api/loans/details/:loanId",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
-  { method: "POST", path: "/api/loans/issue", roles: ["ADMIN", "SUPER_ADMIN"] },
+  {
+    method: "POST",
+    path: "/api/loans/issue",
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+  },
   {
     method: "POST",
     path: "/api/loans/collect/payment/:loanId",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
-  { method: "GET", path: "/api/loans/list", roles: ["ADMIN", "SUPER_ADMIN"] },
+  {
+    method: "GET",
+    path: "/api/loans/list",
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+  },
   {
     method: "PATCH",
     path: "/api/loans/update/status/:loanId",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
   {
     method: "GET",
     path: "/api/loans/collections/due",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
   {
     method: "GET",
     path: "/api/loans/payments/:loanId",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
 
   // Users/Customers routes
   {
     method: "POST",
     path: "/api/users/create",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
   {
     method: "GET",
     path: "/api/users/weekday",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
-  { method: "GET", path: "/api/users/:id", roles: ["ADMIN", "SUPER_ADMIN"] },
+  {
+    method: "GET",
+    path: "/api/users/:id",
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+  },
   {
     method: "PATCH",
     path: "/api/users/update/:id",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
   {
     method: "GET",
@@ -96,17 +109,25 @@ const rbacRules: RBACRule[] = [
   {
     method: "GET",
     path: "/api/users/loans/:userId",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
 
   // Reports routes
   {
     method: "GET",
     path: "/api/reports/cash-outstanding",
-    roles: ["SUPER_ADMIN"],
+    roles: ["ADMIN", "SUPER_ADMIN"],
   },
-  { method: "GET", path: "/api/reports/earnings", roles: ["SUPER_ADMIN"] },
-  { method: "GET", path: "/api/reports/overdue", roles: ["SUPER_ADMIN"] },
+  {
+    method: "GET",
+    path: "/api/reports/earnings",
+    roles: ["ADMIN", "SUPER_ADMIN"],
+  },
+  {
+    method: "GET",
+    path: "/api/reports/overdue",
+    roles: ["ADMIN", "SUPER_ADMIN"],
+  },
 ];
 
 function matchPath(pattern: string, actual: string): boolean {
