@@ -1,10 +1,18 @@
 import { LoanStatus } from "./loanTypes";
 
-export type Week = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
+export type Week =
+  | "MONDAY"
+  | "TUESDAY"
+  | "WEDNESDAY"
+  | "THURSDAY"
+  | "FRIDAY"
+  | "SATURDAY"
+  | "SUNDAY";
 
 export interface User {
   id: string;
   customer_name: string;
+  created_by: string;
   phone_number: string;
   referred_by_id: string | null;
   preferred_payment_day: Week;

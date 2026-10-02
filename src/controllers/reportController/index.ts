@@ -7,12 +7,6 @@ export async function cashOutstanding(
   res: Response,
   next: NextFunction,
 ) {
-  if (req.user!.role !== "SUPER_ADMIN") {
-    throw new AppError(
-      403,
-      "You do not have permission to access this resource",
-    );
-  }
   try {
     const report = await ReportService.getCashOutstanding();
 
@@ -32,12 +26,6 @@ export async function earnings(
   res: Response,
   next: NextFunction,
 ) {
-  if (req.user!.role !== "SUPER_ADMIN") {
-    throw new AppError(
-      403,
-      "You do not have permission to access this resource",
-    );
-  }
   try {
     const report = await ReportService.getEarnings();
 
@@ -57,12 +45,6 @@ export async function overdueLoans(
   res: Response,
   next: NextFunction,
 ) {
-  if (req.user!.role !== "SUPER_ADMIN") {
-    throw new AppError(
-      403,
-      "You do not have permission to access this resource",
-    );
-  }
   try {
     const report = await ReportService.getOverdueLoans();
 

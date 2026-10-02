@@ -10,12 +10,15 @@ import {
   Week,
 } from "../../types/userTypes";
 
-export async function createUserRepo(payload: CreateUserSchema): Promise<User> {
+export async function createUserRepo(
+  payload: CreateUserSchema,
+  createdBy: string,
+): Promise<User> {
   const result = await getPool().query(
     `
-      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_at)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, customer_name, phone_number, referred_by_id, preferred_payment_day, created_at
+      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
     `,
     [
       payload.customer_name,
@@ -23,6 +26,7 @@ export async function createUserRepo(payload: CreateUserSchema): Promise<User> {
       payload.referred_by_id,
       payload.preferred_payment_day,
       payload.created_at,
+      createdBy,
     ],
   );
 
@@ -117,11 +121,13 @@ export async function updateUserRepo(
   return result.rows[0] ?? null;
 }
 
-export async function findLoansByUserIdRepo(userId: string): Promise<UserLoanRow[] | null> {
+export async function findLoansByUserIdRepo(
+  userId: string,
+): Promise<UserLoanRow[] | null> {
   const result = await getPool().query(
     `
       SELECT
-        l.id AS loan_id, l.customer_id, l.nominal_amount, l.upfront_fee, l.disbursed_amount,
+        l.id AS loan_id, l.customer_id, l.issued_by_admin_id, l.nominal_amount, l.upfront_fee, l.disbursed_amount,
         l.total_payable_amount, l.weekly_payable_amount, l.total_months, l.total_weeks,
         l.status, l.issued_at
       FROM customers u
@@ -138,7 +144,9 @@ export async function findLoansByUserIdRepo(userId: string): Promise<UserLoanRow
   return result.rows;
 }
 
-export async function findReferralsByUserIdRepo(userId: string): Promise<(User | null)[] | null> {
+export async function findReferralsByUserIdRepo(
+  userId: string,
+): Promise<(User | null)[] | null> {
   const result = await getPool().query(
     `
       SELECT r.id, r.customer_name, r.phone_number, r.referred_by_id, r.preferred_payment_day, r.created_at
@@ -164,10 +172,14 @@ export async function listUsersRepo(
 
   if (filters.search) {
     values.push(`%${filters.search}%`);
-    conditions.push(`(customer_name ILIKE $${values.length} OR phone_number ILIKE $${values.length})`);
+    conditions.push(
+      `(customer_name ILIKE $${values.length} OR phone_number ILIKE $${values.length})`,
+    );
   }
 
-  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const whereClause = conditions.length
+    ? `WHERE ${conditions.join(" AND ")}`
+    : "";
   const offset = (filters.page - 1) * filters.limit;
   const listValues = [...values, filters.limit, offset];
 

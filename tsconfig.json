@@ -3,6 +3,7 @@
   "compilerOptions": {
     "target": "es2022",
     "module": "nodenext",
+    "skipLibCheck": true,
     "moduleResolution": "nodenext",
     "strict": true,
     "esModuleInterop": true,
