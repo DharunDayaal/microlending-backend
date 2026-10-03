@@ -17,6 +17,9 @@ export interface User {
   phone_number: string;
   referred_by_id: string | null;
   preferred_payment_day: Week;
+  street_name: string | null;
+  city: string;
+  district: string;
   created_at: Date;
   updated_at: Date;
 }

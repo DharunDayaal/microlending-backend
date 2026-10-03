@@ -17,8 +17,8 @@ export async function createUserRepo(
 ): Promise<User> {
   const result = await getPool().query(
     `
-      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, created_by, owning_admin_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, created_by, owning_admin_id, street_name, city, district)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `,
     [
@@ -29,6 +29,9 @@ export async function createUserRepo(
       payload.created_at,
       createdBy,
       owiningAdminId,
+      payload.street_name,
+      payload.city,
+      payload.district,
     ],
   );
 
@@ -56,7 +59,7 @@ export async function getUsersOnWeekdayRepo(
 
   const result = await getPool().query<User>(
     `
-      SELECT id, customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, owning_admin_id, created_by
+      SELECT id, customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, owning_admin_id, created_by, street_name, city, district
       FROM customers
       WHERE ${conditions.join(" AND ")}
       LIMIT $${limitIndex} OFFSET $${offsetIndex}
