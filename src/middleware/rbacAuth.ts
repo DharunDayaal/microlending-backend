@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { AppError } from "../helpers";
+import { AppError, logger } from "../helpers";
 import { verifyAccessToken } from "../helpers/jwt";
 import { findAdminByIdRepo } from "../repositories/authRepo";
 import { getAllowedRoles, isPublicRoute } from "../rbac/rbacRules";
@@ -53,7 +53,7 @@ export async function rbacAuth(
       );
     }
 
-    const admin = await findAdminByIdRepo(decodedToken.userId);
+    const admin = await findAdminByIdRepo(decodedToken.user_id);
     if (!admin || !admin.is_active) {
       return next(
         new AppError(
@@ -80,12 +80,13 @@ export async function rbacAuth(
       );
     }
 
-    req.user = { id: admin.id, role: admin.role };
+    req.user = { id: admin.id, role: admin.role, teamId: admin.admin_id ?? admin.id };
     next();
   } catch (error) {
     if (error instanceof AppError) {
       return next(error);
     }
+    logger.error(`Unexpected error in rbacAuth middleware: ${error}`);
     next(
       new AppError(
         401,

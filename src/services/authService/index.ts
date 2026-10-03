@@ -11,6 +11,7 @@ import * as AuthRepository from "../../repositories/authRepo";
 import {
   AdminUserPublic,
   RegisterAdminPayload,
+  RequestingUser,
   TokenPair,
 } from "../../types/authTypes";
 import { hashPassword } from "../../helpers";
@@ -22,6 +23,7 @@ import {
 import { getPool, withTransaction } from "../../config/database";
 import * as OtpRepository from "../../repositories/otpRepo";
 import {
+  CreateEmployeeSchema,
   LoginByEmailSchema,
   LoginByPhoneSchema,
 } from "../../schemas/authSchema";
@@ -115,8 +117,9 @@ export async function loginByEmail(
   }
 
   const accessToken = await signAccessToken({
-    userId: admin.id,
+    user_id: admin.id,
     role: admin.role,
+    team_id: admin.admin_id ?? admin.id,
   });
   const { token: refreshToken, expiresAt } = signRefreshToken();
 
@@ -200,7 +203,7 @@ export async function loginByPhoneNumber(
     throw new AppError(outcome.status, outcome.message);
   }
 
-  const accessToken = signAccessToken({ userId: admin.id, role: admin.role });
+  const accessToken = signAccessToken({ user_id: admin.id, role: admin.role, team_id: admin.admin_id ?? admin.id });
   const { token: refreshToken, expiresAt } = signRefreshToken();
   await RefreshRepository.storeRefreshTokenRepo(
     getPool(),
@@ -271,12 +274,12 @@ export async function refreshTokens(refreshToken: string): Promise<TokenPair> {
     throw new AppError(401, "Account no longer active");
   }
 
-  const accessToken = signAccessToken({ userId: admin.id, role: admin.role });
+  const accessToken = signAccessToken({ user_id: admin.id, role: admin.role, team_id: admin.admin_id ?? admin.id });
 
   return { access_token: accessToken, refresh_token: outcome.newRefreshToken! };
 }
 
-export async function revokeRefreshToken(refreshToken: string): Promise<void> {
+export async function revokeAllRefreshToken(refreshToken: string): Promise<void> {
   const tokenHash = hashRefreshToken(refreshToken);
   const record = await RefreshRepository.findRefreshTokenByHashRepo(tokenHash);
   if (record && !record.revoked_at) {
@@ -284,5 +287,38 @@ export async function revokeRefreshToken(refreshToken: string): Promise<void> {
       getPool(),
       record.user_id,
     );
+  }
+}
+
+export async function createEmployee(
+  payload: CreateEmployeeSchema,
+  creator: RequestingUser,
+): Promise<AdminUserPublic> {
+  if (creator.role !== "ADMIN") {
+    throw new AppError(403, "Only admins can create employees");
+  }
+
+  const passwordHash = await hashPassword(payload.password);
+  const hasOverrides = payload.default_total_months !== undefined;
+
+  try {
+    const employee = await AuthRepository.createEmployeeRepo({
+      user_name: payload.user_name,
+      phone_number: payload.phone_number,
+      email: payload.email,
+      password_hash: passwordHash,
+      admin_id: creator.id,
+      default_upfront_fee_percentage: payload.default_upfront_fee_percentage,
+      default_interest_percentage: payload.default_interest_percentage,
+      default_total_months: payload.default_total_months,
+      default_total_weeks: hasOverrides ? calculateTotalWeeks(payload.default_total_months!) : undefined,
+    });
+    return toController(employee);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === PG_UNIQUE_VIOLATION_ERROR_CODE) {
+      throw new AppError(409, "Email or phone number is already registered");
+    }
+    throw error;
   }
 }

@@ -15,6 +15,7 @@ export interface Loan {
   id: string;
   customer_id: string;
   issued_by_admin_id: string;
+  owning_admin_id: string;
   nominal_amount: number;
   upfront_fee: number;
   disbursed_amount: number;
@@ -29,6 +30,7 @@ export interface Loan {
 export interface CreateLoanPayload {
   customer_id: string;
   issued_by_admin_id: string;
+  owning_admin_id: string;
   nominal_amount: number;
   upfront_fee: number;
   disbursed_amount: number;
@@ -58,6 +60,7 @@ export interface Payment {
   track_id: string;
   loan_id: string;
   amount_paid: number;
+  collected_by_admin_id: string;
   paid_at: Date;
 }
 
@@ -73,7 +76,7 @@ export interface LoanWithSummary extends Loan {
 export interface ListLoansFilters {
   status?: LoanStatus;
   customer_id?: string;
-  issued_by_admin_id?: string;
+  owning_admin_id?: string;
   search?: string;
   issued_from?: Date;
   issued_to?: Date;

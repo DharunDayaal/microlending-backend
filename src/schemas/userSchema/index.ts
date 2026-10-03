@@ -6,7 +6,10 @@ export const createUserSchema = z.object({
   phone_number: z.string().min(13, "Phone number is required"),
   referred_by_id: z.string().optional(),
   preferred_payment_day: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']),
-  created_at: z.date().optional()
+  created_at: z.date().optional(),
+  street_name: z.string().optional(),
+  city: z.string().min(1, "City is required"),
+  district: z.string().min(1, "District is required"),
 });
 
 export const updateUserSchema = z.object({

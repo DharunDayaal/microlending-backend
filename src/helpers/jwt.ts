@@ -23,15 +23,19 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   if (
     typeof decodeToken !== "object" ||
     decodeToken === null ||
-    typeof decodeToken.userId !== "string" ||
-    (decodeToken.role !== "ADMIN" && decodeToken.role !== "SUPER_ADMIN")
+    typeof decodeToken.user_id !== "string" ||
+    typeof decodeToken.team_id !== "string" ||
+    (decodeToken.role !== "USER" &&
+      decodeToken.role !== "ADMIN" &&
+      decodeToken.role !== "SUPER_ADMIN")
   ) {
     throw new Error("Invalid token payload");
   }
 
   return {
-    userId: decodeToken.userId,
+    user_id: decodeToken.user_id,
     role: decodeToken.role,
+    team_id: decodeToken.team_id,
   };
 }
 

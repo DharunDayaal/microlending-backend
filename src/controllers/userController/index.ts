@@ -20,16 +20,20 @@ export async function createUser(
       payload.created_at = new Date();
     }
 
-    const user = await UserService.createUser(payload);
+    const user = await UserService.createUser(
+      payload,
+      req.user!.id,
+      req.user!.teamId,
+    );
 
     successResponse(201, res, { user }, "User created successfully");
   } catch (error) {
     const code = (error as { code?: string }).code;
     if (code === PG_UNIQUE_VIOLATION_ERROR_CODE) {
-      throw new AppError(409, "Phone number is already registered");
+      return next(new AppError(409, "Phone number is already registered"));
     }
     if (code === PG_FOREIGN_KEY_VIOLATION_ERROR_CODE) {
-      throw new AppError(404, "Referring user not found");
+      return next(new AppError(404, "Referring user not found"));
     }
     next(error);
   }
@@ -43,7 +47,7 @@ export async function getUserById(
   try {
     const userId = req.params.id;
 
-    const user = await UserService.getUserById(userId);
+    const user = await UserService.getUserById(userId, req.user!);
 
     if (!user) {
       failureResponse(404, res, "User not found");
@@ -64,6 +68,7 @@ export async function getUsersOnWeekday(
   try {
     if (!req.query.week || typeof req.query.week !== "string") {
       failureResponse(400, res, "Weekday is required");
+      return;
     }
 
     const weekday = req.query.week as Week;
@@ -88,12 +93,16 @@ export async function getUsersOnWeekday(
       search,
     };
 
-    const users = await UserService.getUsersOnWeekday(payload);
+    const users = await UserService.getUsersOnWeekday(payload, req.user!);
 
     const totalUsersLength = users.length;
 
     if (totalUsersLength === 0) {
-      failureResponse(404, res, "No users found for the specified weekday");
+      return failureResponse(
+        404,
+        res,
+        "No users found for the specified weekday",
+      );
     }
 
     const hasNextPage = totalUsersLength > limit;
@@ -123,9 +132,13 @@ export async function updateUser(
   try {
     const { userId } = req.params;
     const payload = updateUserSchema.parse(req.body);
-    const updatedUser = await UserService.updateUser(userId, payload);
+    const updatedUser = await UserService.updateUser(
+      userId,
+      payload,
+      req.user!,
+    );
     if (!updatedUser) {
-      failureResponse(404, res, "User not found");
+      return failureResponse(404, res, "User not found");
     }
     successResponse(
       200,
@@ -149,7 +162,7 @@ export async function getUserLoans(
 ) {
   try {
     const { userId } = req.params;
-    const loans = await UserService.getUserLoans(userId);
+    const loans = await UserService.getUserLoans(userId, req.user!);
     successResponse(200, res, { loans }, "User loans retrieved successfully");
   } catch (error) {
     next(error);
@@ -163,8 +176,13 @@ export async function getUserReferrals(
 ) {
   try {
     const { userId } = req.params;
-    const referrals = await UserService.getUserReferrals(userId);
-    successResponse(200, res, { referrals }, "User referrals retrieved successfully");
+    const referrals = await UserService.getUserReferrals(userId, req.user!);
+    successResponse(
+      200,
+      res,
+      { referrals },
+      "User referrals retrieved successfully",
+    );
   } catch (error) {
     next(error);
   }
