@@ -29,7 +29,7 @@ export const loginByEmailSchema = z.object({
 export const loginByPhoneSchema = z.object({
   phone_number: z.string().min(6),
   otp_code: z.string().length(6),
-  purpose: z.enum(["LOGIN", "RESET_PASSWORD", "VERIFY_PHONE_NUMBER"]),
+  purpose: z.enum(["LOGIN", "RESET_PASSWORD", "VERIFY_PHONE_NUMBER", "RESEND_OTP", "REGISTER"]),
 });
 
 export const refreshTokenSchema = z.object({
