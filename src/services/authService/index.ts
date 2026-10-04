@@ -109,11 +109,18 @@ export async function loginByEmail(
     throw new AppError(
       403,
       "Your account is pending approval from a super admin",
+      true,
+      "ACCOUNT_PENDING_APPROVAL",
     );
   }
 
   if (!admin.is_active) {
-    throw new AppError(403, "Your account has been deactivated");
+    throw new AppError(
+      403,
+      "Your account has been deactivated",
+      true,
+      "ACCOUNT_DEACTIVATED",
+    );
   }
 
   const accessToken = await signAccessToken({
@@ -149,10 +156,17 @@ export async function loginByPhoneNumber(
     throw new AppError(
       403,
       "Your account is pending approval from a super admin",
+      true,
+      "ACCOUNT_PENDING_APPROVAL",
     );
   }
   if (!admin.is_active) {
-    throw new AppError(403, "Your account has been deactivated");
+    throw new AppError(
+      403,
+      "Your account has been deactivated",
+      true,
+      "ACCOUNT_DEACTIVATED",
+    );
   }
 
   type OtpOutcome =
@@ -203,7 +217,11 @@ export async function loginByPhoneNumber(
     throw new AppError(outcome.status, outcome.message);
   }
 
-  const accessToken = signAccessToken({ user_id: admin.id, role: admin.role, team_id: admin.admin_id ?? admin.id });
+  const accessToken = signAccessToken({
+    user_id: admin.id,
+    role: admin.role,
+    team_id: admin.admin_id ?? admin.id,
+  });
   const { token: refreshToken, expiresAt } = signRefreshToken();
   await RefreshRepository.storeRefreshTokenRepo(
     getPool(),
@@ -274,12 +292,18 @@ export async function refreshTokens(refreshToken: string): Promise<TokenPair> {
     throw new AppError(401, "Account no longer active");
   }
 
-  const accessToken = signAccessToken({ user_id: admin.id, role: admin.role, team_id: admin.admin_id ?? admin.id });
+  const accessToken = signAccessToken({
+    user_id: admin.id,
+    role: admin.role,
+    team_id: admin.admin_id ?? admin.id,
+  });
 
   return { access_token: accessToken, refresh_token: outcome.newRefreshToken! };
 }
 
-export async function revokeAllRefreshToken(refreshToken: string): Promise<void> {
+export async function revokeAllRefreshToken(
+  refreshToken: string,
+): Promise<void> {
   const tokenHash = hashRefreshToken(refreshToken);
   const record = await RefreshRepository.findRefreshTokenByHashRepo(tokenHash);
   if (record && !record.revoked_at) {
@@ -311,7 +335,9 @@ export async function createEmployee(
       default_upfront_fee_percentage: payload.default_upfront_fee_percentage,
       default_interest_percentage: payload.default_interest_percentage,
       default_total_months: payload.default_total_months,
-      default_total_weeks: hasOverrides ? calculateTotalWeeks(payload.default_total_months!) : undefined,
+      default_total_weeks: hasOverrides
+        ? calculateTotalWeeks(payload.default_total_months!)
+        : undefined,
     });
     return toController(employee);
   } catch (error) {
