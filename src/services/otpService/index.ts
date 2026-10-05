@@ -22,6 +22,14 @@ export async function requestOtp(
     }
   }
 
+  if (purpose === "RESET_PASSWORD") {
+    const existing =
+      await AuthRepository.findAdminByPhoneNumberRepo(phone_number);
+    if (!existing) {
+      throw new AppError(409, "No account found with this phone number");
+    }
+  }
+
   const lastOtp = await OtpRepository.findLatestOtpRepo(phone_number, purpose);
   if (lastOtp) {
     const secondsSinceLastOtp =

@@ -73,6 +73,17 @@ export async function findAdminByIdRepo(id: string): Promise<AdminUser | null> {
   return result.rows[0] ?? null;
 }
 
+export async function updatePasswordRepo(
+  client: PoolClient,
+  adminId: string,
+  passwordHash: string,
+): Promise<void> {
+  await client.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [
+    passwordHash,
+    adminId,
+  ]);
+}
+
 export async function createEmployeeRepo(
   payload: CreateEmployeePayload,
 ): Promise<AdminUser> {

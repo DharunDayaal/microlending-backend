@@ -26,6 +26,7 @@ import {
   CreateEmployeeSchema,
   LoginByEmailSchema,
   LoginByPhoneSchema,
+  ResetPasswordSchema,
 } from "../../schemas/authSchema";
 import * as RefreshRepository from "../../repositories/refreshRepository";
 
@@ -234,6 +235,49 @@ export async function loginByPhoneNumber(
     tokens: { access_token: accessToken, refresh_token: refreshToken },
     admin: toController(admin),
   };
+}
+
+export async function resetPassword(
+  payload: ResetPasswordSchema,
+): Promise<void> {
+  const admin = payload.email
+    ? await AuthRepository.findAdminByEmailRepo(payload.email)
+    : await AuthRepository.findAdminByPhoneNumberRepo(payload.phone_number!);
+
+  if (!admin) {
+    // Generic message — don't reveal whether this email/phone has an account
+    throw new AppError(400, "Invalid request");
+  }
+
+  const validSince = new Date(
+    Date.now() - VERIFIED_OTP_VALID_FOR_MINUTES * 60 * 1000,
+  );
+  const passwordHash = await hashPassword(payload.new_password);
+
+  await withTransaction(async (client) => {
+    // The OTP check always runs against the account's actual phone number
+    // on file — even when the caller identified themselves by email.
+    const verifiedOtp = await OtpRepository.findVerifiedUncosumedOtpForUpdateRepo(
+      client,
+      admin.phone_number,
+      "RESET_PASSWORD",
+      validSince,
+    );
+    if (!verifiedOtp) {
+      throw new AppError(
+        400,
+        "Phone number not verified. Please verify OTP before resetting your password.",
+      );
+    }
+
+    await AuthRepository.updatePasswordRepo(client, admin.id, passwordHash);
+    await OtpRepository.markOtpConsumedRepo(client, verifiedOtp.id);
+
+    // Force every existing session to log back in with the new password —
+    // same reasoning as the refresh-token-reuse case: a password reset
+    // should kill any session started under the old password.
+    await RefreshRepository.revokeAllRefreshTokensForUserRepo(client, admin.id);
+  });
 }
 
 export async function refreshTokens(refreshToken: string): Promise<TokenPair> {
