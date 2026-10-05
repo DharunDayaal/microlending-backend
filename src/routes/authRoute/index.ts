@@ -8,6 +8,7 @@ import {
   loginByPhoneSchema,
   refreshTokenSchema,
   createEmployeeSchema,
+  resetPasswordSchema,
 } from "../../schemas/authSchema";
 import { validateBody } from "../../middleware/validateBody";
 import { rbacAuth } from "../../middleware/rbacAuth";
@@ -38,6 +39,12 @@ router.post(
   "/login/phone",
   validateBody(loginByPhoneSchema),
   AuthController.loginByPhone,
+);
+
+router.post(
+  "/password/reset",
+  validateBody(resetPasswordSchema),
+  AuthController.resetPassword,
 );
 
 router.post(

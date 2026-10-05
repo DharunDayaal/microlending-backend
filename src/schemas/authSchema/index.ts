@@ -12,13 +12,25 @@ export const registerSchema = z.object({
 
 export const requestOtpSchema = z.object({
   phone_number: z.string().min(6),
-  purpose: z.enum(["LOGIN", "RESET_PASSWORD", "VERIFY_PHONE_NUMBER"]),
+  purpose: z.enum([
+    "LOGIN",
+    "RESET_PASSWORD",
+    "VERIFY_PHONE_NUMBER",
+    "RESEND_OTP",
+    "REGISTER",
+  ]),
 });
 
 export const verifyOtpSchema = z.object({
   phone_number: z.string().min(6),
   otp_code: z.string().length(6),
-  purpose: z.enum(["LOGIN", "RESET_PASSWORD", "VERIFY_PHONE_NUMBER"]),
+  purpose: z.enum([
+    "LOGIN",
+    "RESET_PASSWORD",
+    "VERIFY_PHONE_NUMBER",
+    "RESEND_OTP",
+    "REGISTER",
+  ]),
 });
 
 export const loginByEmailSchema = z.object({
@@ -29,8 +41,24 @@ export const loginByEmailSchema = z.object({
 export const loginByPhoneSchema = z.object({
   phone_number: z.string().min(6),
   otp_code: z.string().length(6),
-  purpose: z.enum(["LOGIN", "RESET_PASSWORD", "VERIFY_PHONE_NUMBER", "RESEND_OTP", "REGISTER"]),
+  purpose: z.enum([
+    "LOGIN",
+    "RESET_PASSWORD",
+    "VERIFY_PHONE_NUMBER",
+    "RESEND_OTP",
+    "REGISTER",
+  ]),
 });
+
+export const resetPasswordSchema = z
+  .object({
+    email: z.string().email().optional(),
+    phone_number: z.string().min(6).optional(),
+    new_password: z.string().min(8),
+  })
+  .refine((data) => !!data.email !== !!data.phone_number, {
+    message: "Provide exactly one of email or phone_number",
+  });
 
 export const refreshTokenSchema = z.object({
   refresh_token: z.string().min(1),
@@ -66,3 +94,4 @@ export type LoginByEmailSchema = z.infer<typeof loginByEmailSchema>;
 export type LoginByPhoneSchema = z.infer<typeof loginByPhoneSchema>;
 export type RefreshTokenSchema = z.infer<typeof refreshTokenSchema>;
 export type CreateEmployeeSchema = z.infer<typeof createEmployeeSchema>;
+export type ResetPasswordSchema = z.infer<typeof resetPasswordSchema>;

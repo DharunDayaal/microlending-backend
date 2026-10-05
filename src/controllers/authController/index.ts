@@ -8,6 +8,7 @@ import {
   RefreshTokenSchema,
   RegisterSchema,
   RequestOtpSchema,
+  ResetPasswordSchema,
   VerifyOtpSchema,
 } from "../../schemas/authSchema";
 import * as OtpService from "../../services/otpService";
@@ -85,6 +86,20 @@ export async function loginByPhone(
     const payload = req.body as LoginByPhoneSchema;
     const result = await AuthService.loginByPhoneNumber(payload);
     successResponse(200, res, result, "Login successful");
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function resetPassword(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const payload = req.body as ResetPasswordSchema;
+    await AuthService.resetPassword(payload);
+    successResponse(200, res, {}, "Password reset successfully");
   } catch (error) {
     next(error);
   }
