@@ -12,6 +12,7 @@ export const publicRoutes: RBACPublicRule[] = [
   { method: "POST", path: "/api/auth/register" },
   { method: "POST", path: "/api/auth/login/email" },
   { method: "POST", path: "/api/auth/login/phone" },
+  { method: "POST", path: "/api/auth/password/reset" },
   { method: "POST", path: "/api/auth/otp/request" },
   { method: "POST", path: "/api/auth/otp/verify" },
   { method: "POST", path: "/api/auth/refresh" },
