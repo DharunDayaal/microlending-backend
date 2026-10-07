@@ -60,3 +60,11 @@ export interface UserLoanRow {
   status: LoanStatus | null;
   issued_at: Date | null;
 }
+
+export interface DashboardSummary {
+  totalTarget: number;
+  totalCollected: number;
+  remainingAmount: number;
+  totalBorrowers: number;
+  borrowersPending: number;
+}

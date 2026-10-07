@@ -2,6 +2,7 @@ import { getPool } from "../../config/database";
 import { CreateUserSchema } from "../../schemas/userSchema";
 import { Loan } from "../../types/loanTypes";
 import {
+  DashboardSummary,
   GetUsersOnWeekdayPayload,
   ListUsersFilters,
   UpdateUserPayload,
@@ -41,28 +42,100 @@ export async function createUserRepo(
 export async function getUsersOnWeekdayRepo(
   payload: GetUsersOnWeekdayPayload,
 ): Promise<User[]> {
-  const conditions: string[] = [`preferred_payment_day = $1`];
-  const values: unknown[] = [payload.weekday];
+  const conditions: string[] = [];
+  const values: unknown[] = [];
 
-  if (payload.search) {
-    values.push(`%${payload.search}%`);
-    conditions.push(`customer_name ILIKE $${values.length}`);
+  const hasSearch =
+    payload.search !== undefined &&
+    payload.search !== null &&
+    payload.search.trim() !== "";
+
+  let searchParamIndex: number | null = null;
+
+  // 1. Weekday filter
+  if (payload.weekday !== undefined && payload.weekday !== null) {
+    values.push(payload.weekday);
+
+    conditions.push(`preferred_payment_day = $${values.length}`);
   }
+
+  // 2. Search filter
+  if (hasSearch) {
+    const search = payload.search!.trim();
+
+    values.push(search);
+    searchParamIndex = values.length;
+
+    conditions.push(`
+      (
+        fts_search_vector @@ websearch_to_tsquery(
+          'english',
+          $${searchParamIndex}
+        )
+        OR similarity(
+          customer_name,
+          $${searchParamIndex}
+        ) > 0.25
+        OR phone_number ILIKE '%' || $${searchParamIndex} || '%'
+        OR street_name ILIKE '%' || $${searchParamIndex} || '%'
+        OR city ILIKE '%' || $${searchParamIndex} || '%'
+        OR district ILIKE '%' || $${searchParamIndex} || '%'
+      )
+    `);
+  }
+
+  // 3. Owning admin filter
   if (payload.owningAdminId) {
     values.push(payload.owningAdminId);
+
     conditions.push(`owning_admin_id = $${values.length}`);
   }
 
-  values.push(payload.limit, payload.startIndex);
-  const limitIndex = values.length - 1;
+  if (conditions.length === 0) {
+    conditions.push("1=1");
+  }
+
+  // 4. Pagination
+  values.push(payload.limit);
+  const limitIndex = values.length;
+
+  values.push(payload.startIndex);
   const offsetIndex = values.length;
+
+  // 5. Ranking
+  let orderBy = `created_at DESC`;
+
+  if (hasSearch && searchParamIndex !== null) {
+    orderBy = `
+      GREATEST(
+        similarity(customer_name, $${searchParamIndex}),
+        similarity(phone_number, $${searchParamIndex}),
+        similarity(city, $${searchParamIndex}),
+        similarity(district, $${searchParamIndex})
+      ) DESC,
+      created_at DESC
+    `;
+  }
 
   const result = await getPool().query<User>(
     `
-      SELECT id, customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, owning_admin_id, created_by, street_name, city, district
-      FROM customers
+      SELECT
+        id,
+        customer_name,
+        phone_number,
+        referred_by_id,
+        preferred_payment_day,
+        created_at,
+        owning_admin_id,
+        created_by,
+        street_name,
+        city,
+        district
+      FROM customers 
       WHERE ${conditions.join(" AND ")}
-      LIMIT $${limitIndex} OFFSET $${offsetIndex}
+      ORDER BY ${orderBy}
+      LIMIT $${limitIndex}
+      OFFSET $${offsetIndex}
     `,
     values,
   );
@@ -207,4 +280,25 @@ export async function listUsersRepo(
   const total = result.rows[0]?.total ?? 0;
   const rows = result.rows.map(({ total: _total, ...row }) => row);
   return { rows, total };
+}
+
+export async function getTodayDashboardSummaryRepo(
+  owningAdminId: string | null,
+): Promise<DashboardSummary> {
+  const result = await getPool().query(
+    `
+      SELECT * FROM get_today_dashboard_summary($1::uuid)
+    `,
+    [owningAdminId],
+  );
+
+  const row = result.rows[0];
+
+  return {
+    totalTarget: Number(row?.total_target ?? 0),
+    totalCollected: Number(row?.total_collected ?? 0),
+    remainingAmount: Number(row?.remaining_amount ?? 0),
+    totalBorrowers: Number(row?.total_borrowers ?? 0),
+    borrowersPending: Number(row?.borrowers_pending ?? 0),
+  };
 }
