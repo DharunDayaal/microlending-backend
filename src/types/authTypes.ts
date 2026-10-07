@@ -1,6 +1,6 @@
 export type UserRole = "USER" | "ADMIN" | "SUPER_ADMIN";
 
-export type OtpPurpose = "LOGIN" | "RESET_PASSWORD" | "VERIFY_PHONE_NUMBER" | "RESEND_OTP" | "REGISTER";
+export type OtpPurpose = "LOGIN" | "RESET_PASSWORD" | "VERIFY_PHONE_NUMBER";
 
 export interface AccessTokenPayload {
   user_id: string;
