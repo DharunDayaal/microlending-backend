@@ -16,8 +16,6 @@ export const requestOtpSchema = z.object({
     "LOGIN",
     "RESET_PASSWORD",
     "VERIFY_PHONE_NUMBER",
-    "RESEND_OTP",
-    "REGISTER",
   ]),
 });
 
@@ -28,8 +26,6 @@ export const verifyOtpSchema = z.object({
     "LOGIN",
     "RESET_PASSWORD",
     "VERIFY_PHONE_NUMBER",
-    "RESEND_OTP",
-    "REGISTER",
   ]),
 });
 
@@ -45,8 +41,6 @@ export const loginByPhoneSchema = z.object({
     "LOGIN",
     "RESET_PASSWORD",
     "VERIFY_PHONE_NUMBER",
-    "RESEND_OTP",
-    "REGISTER",
   ]),
 });
 

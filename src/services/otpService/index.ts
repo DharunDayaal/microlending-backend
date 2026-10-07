@@ -14,9 +14,11 @@ export async function requestOtp(
   phone_number: string,
   purpose: OtpPurpose,
 ): Promise<void> {
+  const normalizedPhoneNumber = phone_number.trim();
+
   if (purpose === "VERIFY_PHONE_NUMBER") {
     const existing =
-      await AuthRepository.findAdminByPhoneNumberRepo(phone_number);
+      await AuthRepository.findAdminByPhoneNumberRepo(normalizedPhoneNumber);
     if (existing) {
       throw new AppError(409, "Phone number is already registered");
     }
@@ -24,13 +26,16 @@ export async function requestOtp(
 
   if (purpose === "RESET_PASSWORD") {
     const existing =
-      await AuthRepository.findAdminByPhoneNumberRepo(phone_number);
+      await AuthRepository.findAdminByPhoneNumberRepo(normalizedPhoneNumber);
     if (!existing) {
       throw new AppError(409, "No account found with this phone number");
     }
   }
 
-  const lastOtp = await OtpRepository.findLatestOtpRepo(phone_number, purpose);
+  const lastOtp = await OtpRepository.findLatestOtpRepo(
+    normalizedPhoneNumber,
+    purpose,
+  );
   if (lastOtp) {
     const secondsSinceLastOtp =
       (Date.now() - lastOtp.created_at.getTime()) / 1000;
@@ -46,8 +51,13 @@ export async function requestOtp(
   const otpHash = await hashOtp(otp);
   const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-  await OtpRepository.createOtpRepo(phone_number, otpHash, purpose, expiresAt);
-  await sendOtpSms(phone_number, otp);
+  await OtpRepository.createOtpRepo(
+    normalizedPhoneNumber,
+    otpHash,
+    purpose,
+    expiresAt,
+  );
+  await sendOtpSms(normalizedPhoneNumber, otp);
 }
 
 export async function verifyOtp(
@@ -55,8 +65,14 @@ export async function verifyOtp(
   otp: string,
   purpose: OtpPurpose,
 ): Promise<void> {
-  const record = await OtpRepository.findLatestOtpRepo(phone_number, purpose);
-  if (!record || record.expires_at < new Date()) {
+  const record = await OtpRepository.findLatestOtpRepo(
+    phone_number.trim(),
+    purpose,
+  );
+  if (
+    !record ||
+    new Date(record.expires_at).getTime() <= Date.now()
+  ) {
     throw new AppError(400, "Invalid or expired OTP");
   }
   if (record.verified_at) {

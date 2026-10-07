@@ -10,6 +10,7 @@ userRouter.post(
   validateBody(createUserSchema),
   UserController.createUser,
 );
+userRouter.get("/today-summary", UserController.getTodayDashboardSummary);
 userRouter.get("/weekday", UserController.getUsersOnWeekday);
 userRouter.get("/:id", UserController.getUserById);
 userRouter.patch(

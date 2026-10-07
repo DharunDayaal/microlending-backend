@@ -80,6 +80,11 @@ const rbacRules: RBACRule[] = [
     path: "/api/loans/payments/:loanId",
     roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
+  {
+    method: "GET",
+    path: "/api/loans/today-summary",
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+  },
 
   // Users/Customers routes
   {

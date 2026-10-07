@@ -7,6 +7,7 @@ import {
   updateUserRepo,
   findLoansByUserIdRepo,
   findReferralsByUserIdRepo,
+  getTodayDashboardSummaryRepo,
 } from "../../repositories/userRepo";
 import { CreateUserSchema } from "../../schemas/userSchema";
 import { RequestingUser } from "../../types/authTypes";
@@ -122,4 +123,35 @@ export async function getUserReferrals(
     throw new AppError(404, "User not found");
   }
   return rows.filter((row): row is User => row !== null && row.id !== null);
+}
+
+function getOwningAdminId(user: RequestingUser) {
+  switch (user.role) {
+    case "SUPER_ADMIN":
+      return null;
+    case "ADMIN":
+      return user.id;
+    case "USER":
+      if (!user.teamId)
+        throw new AppError(400, "User is not associated with an admin");
+      return user.teamId;
+    default:
+      throw new Error("Invalid user role");
+  }
+}
+
+export async function getTodayDashboardSummary(user: RequestingUser) {
+  const owningAdminId = getOwningAdminId(user);
+  const summary = await getTodayDashboardSummaryRepo(owningAdminId);
+
+  const today = new Date();
+  return {
+    date: today.toISOString().split("T")[0],
+    weekday: today
+      .toLocaleDateString("en-us", {
+        weekday: "long",
+      })
+      .toUpperCase(),
+    ...summary,
+  };
 }

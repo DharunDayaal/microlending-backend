@@ -187,3 +187,24 @@ export async function getUserReferrals(
     next(error);
   }
 }
+
+export async function getTodayDashboardSummary(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const user = req.user!;
+
+    const dashboard = await UserService.getTodayDashboardSummary(user);
+
+    successResponse(
+      200,
+      res,
+      { dashboard },
+      "Dashboard summary retrived successfully",
+    );
+  } catch (error) {
+    next(error);
+  }
+}
