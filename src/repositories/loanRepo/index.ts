@@ -368,3 +368,13 @@ export async function listPaymentsByLoanIdRepo(
   const rows = result.rows.map(({ total: _total, ...row }) => row);
   return { rows, total };
 }
+
+export async function setLoanClosedAtRepo(
+  client: PoolClient,
+  loanId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE loans SET closed_at = now() WHERE id = $1 AND closed_at IS NULL`,
+    [loanId],
+  );
+}

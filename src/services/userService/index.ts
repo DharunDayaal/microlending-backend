@@ -105,6 +105,7 @@ export async function getUserLoans(
       total_weeks: row.total_weeks!,
       status: row.status!,
       issued_at: row.issued_at!,
+      closed_at: row.closed_at,
     }));
 }
 

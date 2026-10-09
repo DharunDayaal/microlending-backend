@@ -17,6 +17,7 @@ export interface User {
   phone_number: string;
   referred_by_id: string | null;
   preferred_payment_day: Week;
+  preferred_payment_time: String | null;
   street_name: string | null;
   city: string;
   district: string;
@@ -59,6 +60,7 @@ export interface UserLoanRow {
   total_weeks: number | null;
   status: LoanStatus | null;
   issued_at: Date | null;
+  closed_at: Date | null;
 }
 
 export interface DashboardSummary {
@@ -67,4 +69,40 @@ export interface DashboardSummary {
   remainingAmount: number;
   totalBorrowers: number;
   borrowersPending: number;
+}
+
+export interface UserWithReferrer extends User {
+  referred_by_name: string | null;
+  referred_by_standing: "GOOD_STANDING" | "NEEDS_ATTENTION" | null;
+}
+
+export interface CreditHistorySummary {
+  on_time_count: number;
+  delayed_count: number;
+  default_count: number;
+  total_loans: number;
+  on_time_ratio: number;
+}
+
+export interface ReferralStats {
+  total_referred: number;
+  active_referred: number;
+  paired_referred: number;
+  paired_percentage: number;
+}
+
+export interface CustomerProfile extends UserWithReferrer {
+  credit_history: CreditHistorySummary;
+  referral_stats: ReferralStats;
+}
+export interface FlatCustomerProfile extends UserWithReferrer {
+  on_time_count: string | number;
+  delayed_count: string | number;
+  default_count: string | number;
+  total_loans: string | number;
+  on_time_ratio: string | number;
+  total_referred: string | number;
+  active_referred: string | number;
+  paired_referred: string | number;
+  paired_percentage: string | number;
 }

@@ -25,6 +25,8 @@ function assertLoanAccess(loan: Loan, user: RequestingUser): void {
   }
 }
 
+const TERMINAL_STATUSES: LoanStatus[] = ["PAID_OFF", "CLOSED", "DEFAULTED"];
+
 export async function isCustomerLoanActive(
   customerId: string,
 ): Promise<boolean> {
@@ -115,7 +117,8 @@ export async function collectPayment(
     let updatedLoan = loan;
     if (totalCollectedForLoan >= loan.total_payable_amount) {
       await LoanRepository.updateLoanStatusRepo(client, loanId, "PAID_OFF");
-      updatedLoan = { ...loan, status: "PAID_OFF" };
+      await LoanRepository.setLoanClosedAtRepo(client, loanId);
+      updatedLoan = { ...loan, status: "PAID_OFF", closed_at: new Date() };
     } else if (loan.status === "ACTIVE" && weekIsPastTerm) {
       await LoanRepository.updateLoanStatusRepo(client, loanId, "OVERDUE");
       updatedLoan = { ...loan, status: "OVERDUE" };
@@ -204,7 +207,16 @@ export async function updateLoanStatus(
   }
   return withTransaction(async (client) => {
     await LoanRepository.updateLoanStatusRepo(client, loanId, status);
-    return { ...loan, status };
+    if (TERMINAL_STATUSES.includes(status) && !loan.closed_at) {
+      await LoanRepository.setLoanClosedAtRepo(client, loanId);
+    }
+    return {
+      ...loan,
+      status,
+      closed_at: TERMINAL_STATUSES.includes(status)
+        ? new Date()
+        : loan.closed_at,
+    };
   });
 }
 

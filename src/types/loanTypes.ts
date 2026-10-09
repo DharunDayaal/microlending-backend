@@ -25,6 +25,7 @@ export interface Loan {
   total_weeks: number;
   status: LoanStatus;
   issued_at: Date;
+  closed_at: Date | null;
 }
 
 export interface CreateLoanPayload {
