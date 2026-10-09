@@ -1,14 +1,14 @@
 import { getPool } from "../../config/database";
 import { CreateUserSchema } from "../../schemas/userSchema";
-import { Loan } from "../../types/loanTypes";
 import {
+  CustomerProfile,
   DashboardSummary,
+  FlatCustomerProfile,
   GetUsersOnWeekdayPayload,
   ListUsersFilters,
   UpdateUserPayload,
   User,
   UserLoanRow,
-  Week,
 } from "../../types/userTypes";
 
 export async function createUserRepo(
@@ -143,15 +143,97 @@ export async function getUsersOnWeekdayRepo(
   return result.rows;
 }
 
-export async function getUserByIdRepo(userId: string): Promise<User | null> {
-  const result = await getPool().query(
+// 1. Define what the database actually returns (flat columns)
+
+export async function getUserByIdRepo(
+  userId: string,
+): Promise<CustomerProfile | null> {
+  // 2. Type the query with the flat structure
+  const result = await getPool().query<FlatCustomerProfile>(
     `
-      SELECT * FROM customers
-      WHERE id = $1
+    SELECT c.*, r.customer_name AS referred_by_name,
+    CASE 
+      WHEN r.id IS NULL THEN NULL 
+      WHEN EXISTS ( SELECT 1 FROM loans WHERE customer_id = r.id AND status IN ('OVERDUE', 'DEFAULTED') ) THEN 'NEEDS_ATTENTION' 
+      ELSE 'GOOD_STANDING' 
+    END AS referred_by_standing,
+    COALESCE(credit.on_time_count, 0) AS on_time_count,
+    COALESCE(credit.delayed_count, 0) AS delayed_count,
+    COALESCE(credit.default_count, 0) AS default_count,
+    COALESCE(credit.total_loans, 0) AS total_loans,
+    CASE WHEN COALESCE(credit.total_loans, 0) = 0 THEN 0 ELSE round(100.0 * credit.on_time_count / credit.total_loans) END AS on_time_ratio,
+    COALESCE(ref.total_referred, 0) AS total_referred,
+    COALESCE(ref.active_referred, 0) AS active_referred,
+    COALESCE(ref.paired_referred, 0) AS paired_referred,
+    CASE WHEN COALESCE(ref.total_referred, 0) = 0 THEN 0 ELSE round(100.0 * ref.paired_referred / ref.total_referred) END AS paired_percentage
+    FROM customers c
+    LEFT JOIN customers r ON r.id = c.referred_by_id
+    LEFT JOIN LATERAL (
+      SELECT 
+        COUNT(*) FILTER (WHERE l.status = 'DEFAULTED') AS default_count,
+        COUNT(*) FILTER (
+          WHERE l.status IN ('PAID_OFF', 'CLOSED') 
+          AND EXISTS (SELECT 1 FROM repayment_tracks rt WHERE rt.loan_id = l.id AND rt.is_overdued)
+        ) AS delayed_count,
+        COUNT(*) FILTER (
+          WHERE (l.status IN ('PAID_OFF', 'CLOSED') AND NOT EXISTS (SELECT 1 FROM repayment_tracks rt WHERE rt.loan_id = l.id AND rt.is_overdued))
+          OR (l.status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM repayment_tracks rt WHERE rt.loan_id = l.id AND rt.is_overdued))
+        ) AS on_time_count,
+        COUNT(*) AS total_loans
+      FROM loans l
+      WHERE l.customer_id = c.id
+    ) credit ON true
+    LEFT JOIN LATERAL (
+      SELECT 
+        COUNT(*) AS total_referred,
+        COUNT(*) FILTER (
+          WHERE EXISTS (SELECT 1 FROM loans WHERE customer_id = ref_c.id AND status IN ('ACTIVE', 'OVERDUE'))
+        ) AS active_referred,
+        COUNT(*) FILTER (
+          WHERE EXISTS (SELECT 1 FROM loans WHERE customer_id = ref_c.id)
+        ) AS paired_referred
+      FROM customers ref_c
+      WHERE ref_c.referred_by_id = c.id
+    ) ref ON true
+    WHERE c.id = $1
     `,
     [userId],
   );
-  return result.rows[0] ?? null;
+
+  const row = result.rows[0];
+  if (!row) return null;
+
+  // 3. Destructure out the flat analytics columns and collect user properties
+  const {
+    on_time_count,
+    delayed_count,
+    default_count,
+    total_loans,
+    on_time_ratio,
+    total_referred,
+    active_referred,
+    paired_referred,
+    paired_percentage,
+    ...userProperties
+  } = row;
+
+  // 4. Return the strictly typed nested object, explicitly casting database numbers
+  return {
+    ...userProperties,
+    credit_history: {
+      on_time_count: Number(on_time_count),
+      delayed_count: Number(delayed_count),
+      default_count: Number(default_count),
+      total_loans: Number(total_loans),
+      on_time_ratio: Number(on_time_ratio),
+    },
+    referral_stats: {
+      total_referred: Number(total_referred),
+      active_referred: Number(active_referred),
+      paired_referred: Number(paired_referred),
+      paired_percentage: Number(paired_percentage),
+    },
+  };
 }
 
 export async function checkUserExistsByPhoneNumberRepo(
@@ -207,12 +289,12 @@ export async function updateUserRepo(
 export async function findLoansByUserIdRepo(
   userId: string,
 ): Promise<UserLoanRow[] | null> {
-  const result = await getPool().query(
+  const result = await getPool().query<UserLoanRow>(
     `
       SELECT
-        l.id AS loan_id, l.customer_id, l.issued_by_admin_id, l.nominal_amount, l.upfront_fee, l.disbursed_amount,
+        l.id AS loan_id, l.customer_id, l.issued_by_admin_id, l.owning_admin_id, l.nominal_amount, l.upfront_fee, l.disbursed_amount,
         l.total_payable_amount, l.weekly_payable_amount, l.total_months, l.total_weeks,
-        l.status, l.issued_at
+        l.status, l.issued_at, l.closed_at
       FROM customers u
       LEFT JOIN loans l ON l.customer_id = u.id
       WHERE u.id = $1
