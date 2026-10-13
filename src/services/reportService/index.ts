@@ -19,6 +19,6 @@ export async function getEarnings(): Promise<EarningsReport> {
   }
 }
 
-export async function getOverdueLoans() {
-  return await ReportRepository.getOverdueLoans();
+export async function getOverdueLoans(page: number, limit: number) {
+  return ReportRepository.getOverdueLoans(page, limit);
 }

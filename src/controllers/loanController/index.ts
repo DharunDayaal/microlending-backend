@@ -150,7 +150,14 @@ export async function listLoans(
     successResponse(
       200,
       res,
-      { loans: rows, total, page: filters.page, limit: filters.limit },
+      {
+        loans: rows,
+        metadata: {
+          current_page: filters.page,
+          limit: filters.limit,
+          has_next_page: filters.page * filters.limit < total,
+        },
+      },
       "Loans fetched successfully",
     );
   } catch (error) {
@@ -178,21 +185,31 @@ export async function updateLoanStatus(
 }
 
 export async function collectionsDue(
-  req: Request<any, any, any, CollectionsDueQuerySchema>,
+  req: Request,
   res: Response,
   next: NextFunction,
 ) {
   try {
-    const { preferred_payment_day } = req.query;
-    const loans = await LoanService.listCollectionsDue(
+    const { preferred_payment_day, page, limit } =
+      res.locals.query as CollectionsDueQuerySchema;
+    const { rows, total } = await LoanService.listCollectionsDue(
       req.user!,
       preferred_payment_day,
+      page,
+      limit,
     );
 
     successResponse(
       200,
       res,
-      { loans },
+      {
+        loans: rows,
+        metadata: {
+          current_page: page,
+          limit,
+          has_next_page: page * limit < total,
+        },
+      },
       "Collections due fetched successfully",
     );
   } catch (error) {
@@ -217,7 +234,14 @@ export async function listPayments(
     successResponse(
       200,
       res,
-      { payments: rows, total, page, limit },
+      {
+        payments: rows,
+        metadata: {
+          current_page: page,
+          limit,
+          has_next_page: page * limit < total,
+        },
+      },
       "Payments fetched successfully",
     );
   } catch (error) {

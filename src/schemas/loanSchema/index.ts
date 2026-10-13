@@ -44,6 +44,8 @@ export const collectionsDueQuerySchema = z.object({
       "SUNDAY",
     ])
     .optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
 });
 
 export const listPaymentsQuerySchema = z.object({

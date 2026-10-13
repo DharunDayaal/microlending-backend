@@ -223,13 +223,17 @@ export async function updateLoanStatus(
 export async function listCollectionsDue(
   user: RequestingUser,
   preferredPaymentDay?: Weekday,
-): Promise<CollectionDueLoan[]> {
-  const loans = await LoanRepository.listCollectionsDueRepo(
+  page = 1,
+  limit = 20,
+): Promise<{ rows: CollectionDueLoan[]; total: number }> {
+  const { rows, total } = await LoanRepository.listCollectionsDueRepo(
+    page,
+    limit,
     preferredPaymentDay,
     user.role === "SUPER_ADMIN" ? undefined : user.teamId,
   );
 
-  return loans.map((loan) => {
+  const mappedRows = rows.map((loan) => {
     const outstandingBalance = loan.total_payable_amount - loan.total_collected;
     return {
       ...loan,
@@ -238,6 +242,8 @@ export async function listCollectionsDue(
         loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
     };
   });
+
+  return { rows: mappedRows, total };
 }
 
 export async function listPayments(
