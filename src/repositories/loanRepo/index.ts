@@ -257,7 +257,7 @@ export async function listLoansRepo(
     conditions.push(`l.customer_id = $${values.length}`);
   }
   if (filters.search) {
-    values.push(`%${filters.search}%`);
+    values.push(`%${filters.search.trim()}%`);
     conditions.push(
       `(u.customer_name ILIKE $${values.length} OR u.phone_number ILIKE $${values.length})`,
     );

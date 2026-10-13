@@ -20,7 +20,7 @@ export const collectPaymentSchema = z.object({
 export const listLoansQuerySchema = z.object({
   status: z.enum(["ACTIVE", "OVERDUE", "PAID_OFF", "DEFAULTED", "CLOSED"]).optional(),
   customer_id: z.uuid().optional(),
-  search: z.string().optional(),
+  search: z.string().trim().min(1).optional(),
   issued_from: z.coerce.date().optional(),
   issued_to: z.coerce.date().optional(),
   page: z.coerce.number().int().positive().default(1),
