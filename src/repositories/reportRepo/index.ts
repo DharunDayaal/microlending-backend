@@ -50,10 +50,14 @@ export async function getEarningsTotalsRepo(): Promise<{
   return result.rows[0];
 }
 
-export async function getOverdueLoans(): Promise<OverdueLoanRow[]> {
+export async function getOverdueLoans(
+  page: number,
+  limit: number,
+): Promise<{ rows: OverdueLoanRow[]; total: number }> {
+  const offset = (page - 1) * limit;
   const result = await getPool().query(
     `
-      SELECT *
+      SELECT x.*, COUNT(*) OVER()::int AS total
       FROM (
         SELECT
           l.*,
@@ -80,8 +84,12 @@ export async function getOverdueLoans(): Promise<OverdueLoanRow[]> {
           OR (x.status = 'ACTIVE' AND x.days_past_due > 0)
         )
       ORDER BY x.days_past_due DESC, x.outstanding_balance DESC
+      LIMIT $1 OFFSET $2
     `,
+    [limit, offset],
   );
 
-  return result.rows;
+  const total = result.rows[0]?.total ?? 0;
+  const rows = result.rows.map(({ total: _total, ...row }) => row);
+  return { rows, total };
 }

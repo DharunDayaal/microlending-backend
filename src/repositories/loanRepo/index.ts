@@ -304,9 +304,11 @@ export async function listLoansRepo(
 }
 
 export async function listCollectionsDueRepo(
+  page: number,
+  limit: number,
   preferredPaymentDay?: Weekday,
   owningAdminId?: string,
-): Promise<CollectionDueRow[]> {
+): Promise<{ rows: CollectionDueRow[]; total: number }> {
   const values: unknown[] = [];
   let dayFilter = "";
 
@@ -319,6 +321,11 @@ export async function listCollectionsDueRepo(
     dayFilter += ` AND l.owning_admin_id = $${values.length}`;
   }
 
+  const offset = (page - 1) * limit;
+  values.push(limit, offset);
+  const limitIndex = values.length - 1;
+  const offsetIndex = values.length;
+
   const result = await getPool().query(
     `
       SELECT
@@ -327,7 +334,8 @@ export async function listCollectionsDueRepo(
         u.phone_number,
         u.preferred_payment_day,
         COALESCE(t.total_collected, 0)::int AS total_collected,
-        COALESCE(t.tracks, '[]'::json) AS tracks
+        COALESCE(t.tracks, '[]'::json) AS tracks,
+        COUNT(*) OVER()::int AS total
       FROM loans l
       JOIN customers u ON u.id = l.customer_id
       LEFT JOIN LATERAL (
@@ -339,10 +347,14 @@ export async function listCollectionsDueRepo(
       ) t ON true
       WHERE l.status IN ('ACTIVE', 'OVERDUE') ${dayFilter}
       ORDER BY u.preferred_payment_day, u.customer_name
+      LIMIT $${limitIndex} OFFSET $${offsetIndex}
     `,
     values,
   );
-  return result.rows;
+
+  const total = result.rows[0]?.total ?? 0;
+  const rows = result.rows.map(({ total: _total, ...row }) => row);
+  return { rows, total };
 }
 
 export async function listPaymentsByLoanIdRepo(
