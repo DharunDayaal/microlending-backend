@@ -192,7 +192,7 @@ export async function collectionsDue(
   try {
     const { preferred_payment_day, page, limit } =
       res.locals.query as CollectionsDueQuerySchema;
-    const { rows, total } = await LoanService.listCollectionsDue(
+    const { rows, total, summary } = await LoanService.listCollectionsDue(
       req.user!,
       preferred_payment_day,
       page,
@@ -204,6 +204,7 @@ export async function collectionsDue(
       res,
       {
         loans: rows,
+        summary,
         metadata: {
           current_page: page,
           limit,

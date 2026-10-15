@@ -225,8 +225,17 @@ export async function listCollectionsDue(
   preferredPaymentDay?: Weekday,
   page = 1,
   limit = 20,
-): Promise<{ rows: CollectionDueLoan[]; total: number }> {
-  const { rows, total } = await LoanRepository.listCollectionsDueRepo(
+): Promise<{
+  rows: CollectionDueLoan[];
+  total: number;
+  summary: {
+    total_customers: number;
+    active_loans: number;
+    overdue_loans: number;
+    referred_customers: number;
+  };
+}> {
+  const { rows, total, summary } = await LoanRepository.listCollectionsDueRepo(
     page,
     limit,
     preferredPaymentDay,
@@ -243,7 +252,7 @@ export async function listCollectionsDue(
     };
   });
 
-  return { rows: mappedRows, total };
+  return { rows: mappedRows, total, summary };
 }
 
 export async function listPayments(
