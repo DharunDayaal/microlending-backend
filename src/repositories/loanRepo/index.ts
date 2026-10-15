@@ -308,7 +308,16 @@ export async function listCollectionsDueRepo(
   limit: number,
   preferredPaymentDay?: Weekday,
   owningAdminId?: string,
-): Promise<{ rows: CollectionDueRow[]; total: number }> {
+): Promise<{
+  rows: CollectionDueRow[];
+  total: number;
+  summary: {
+    total_customers: number;
+    active_loans: number;
+    overdue_loans: number;
+    referred_customers: number;
+  };
+}> {
   const values: unknown[] = [];
   let dayFilter = "";
 
@@ -321,6 +330,7 @@ export async function listCollectionsDueRepo(
     dayFilter += ` AND l.owning_admin_id = $${values.length}`;
   }
 
+  const summaryValues = [...values];
   const offset = (page - 1) * limit;
   values.push(limit, offset);
   const limitIndex = values.length - 1;
@@ -354,7 +364,21 @@ export async function listCollectionsDueRepo(
 
   const total = result.rows[0]?.total ?? 0;
   const rows = result.rows.map(({ total: _total, ...row }) => row);
-  return { rows, total };
+  const summaryResult = await getPool().query(
+    `
+      SELECT
+        COUNT(DISTINCT u.id)::int AS total_customers,
+        COUNT(*) FILTER (WHERE l.status = 'ACTIVE')::int AS active_loans,
+        COUNT(*) FILTER (WHERE l.status = 'OVERDUE')::int AS overdue_loans,
+        COUNT(DISTINCT u.id) FILTER (WHERE u.referred_by_id IS NOT NULL)::int AS referred_customers
+      FROM loans l
+      JOIN customers u ON u.id = l.customer_id
+      WHERE l.status IN ('ACTIVE', 'OVERDUE') ${dayFilter}
+    `,
+    summaryValues,
+  );
+
+  return { rows, total, summary: summaryResult.rows[0] };
 }
 
 export async function listPaymentsByLoanIdRepo(
