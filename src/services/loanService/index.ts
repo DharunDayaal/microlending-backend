@@ -25,6 +25,16 @@ function assertLoanAccess(loan: Loan, user: RequestingUser): void {
   }
 }
 
+function deriveIsOverdue(
+  loan: Pick<Loan, "status" | "issued_at" | "total_weeks">,
+  outstandingBalance: number,
+): boolean {
+  if (outstandingBalance <= 0) return false;
+  if (loan.status === "OVERDUE") return true; // flipped by the nightly job or by collectPayment
+  // Fallback for the gap between the term ending and the next cron run
+  return loan.status === "ACTIVE" && isPastDue(loan as Loan);
+}
+
 const TERMINAL_STATUSES: LoanStatus[] = ["PAID_OFF", "CLOSED", "DEFAULTED"];
 
 export async function isCustomerLoanActive(
@@ -56,7 +66,7 @@ export async function collectPayment(
   user: RequestingUser,
 ): Promise<{ track: RepaymentTrackResponse; loan: Loan }> {
   return await withTransaction(async (client) => {
-    if (amountPaid < 0) {
+    if (amountPaid <= 0) {
       throw new AppError(400, "Amount paid must be a positive number");
     }
 
@@ -146,8 +156,7 @@ export async function getLoanById(
   return {
     ...loan,
     outstanding_amount: outstandingBalance,
-    is_overdue:
-      loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
+    is_overdue: deriveIsOverdue(loan, outstandingBalance),
     tracks: loan.tracks.map((track) => ({
       ...track,
       remaining_balance: Math.max(
@@ -170,10 +179,10 @@ export async function listLoans(
 
   const withOverdue = rows.map((row) => ({
     ...row,
-    is_overdue:
-      row.status === "ACTIVE" &&
-      row.total_collected < row.total_payable_amount &&
-      isPastDue(row),
+    is_overdue: deriveIsOverdue(
+      row,
+      row.total_payable_amount - row.total_collected,
+    ),
   }));
 
   return { rows: withOverdue, total };
@@ -247,8 +256,7 @@ export async function listCollectionsDue(
     return {
       ...loan,
       outstanding_amount: outstandingBalance,
-      is_overdue:
-        loan.status === "ACTIVE" && outstandingBalance > 0 && isPastDue(loan),
+      is_overdue: deriveIsOverdue(loan, outstandingBalance),
     };
   });
 
