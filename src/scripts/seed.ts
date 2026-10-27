@@ -1,208 +1,21 @@
+
 import { faker } from "@faker-js/faker";
-import { Pool, PoolClient } from "pg";
-import { getPool } from "../config/database";
+import { getPool, closePool } from "../config/database";
+import { randomUUID } from "node:crypto";
 
-const pool = getPool();
-/**
- * Existing ADMIN in your database.
- */
-const ADMIN_ID = "eb4bc22a-eac5-479c-99e6-db854e860648";
+const TARGET_ADMIN_ID = "eb4bc22a-eac5-479c-99e6-db854e860648";
 
-/**
- * Seed configuration
- */
-const CUSTOMER_COUNT = 11_000;
-const EMPLOYEE_COUNT = 10;
+const CUSTOMER_COUNT = 11000;
+const CUSTOMER_BATCH_SIZE = 500;
 
-const CUSTOMER_BATCH_SIZE = 1_000;
-const LOAN_BATCH_SIZE = 1_000;
-const TRACK_BATCH_SIZE = 2_000;
-const PAYMENT_BATCH_SIZE = 2_000;
+const LOAN_BATCH_SIZE = 500;
+const TRACK_BATCH_SIZE = 500;
+const PAYMENT_BATCH_SIZE = 500;
 
-/**
- * Percentage of customers that should have loans.
- */
-const LOAN_CUSTOMER_PERCENTAGE = 0.85;
+// All loan histories start on or after August 1, 2026.
+const LOAN_HISTORY_START_DATE = new Date(2026, 7, 1);
 
-/**
- * Percentage of today's customers that should
- * be deliberately created for dashboard testing.
- */
-const TODAY_DUE_PERCENTAGE = 0.20;
-
-/**
- * Enums from your PostgreSQL schema.
- */
-type Weekday =
-  | "MONDAY"
-  | "TUESDAY"
-  | "WEDNESDAY"
-  | "THURSDAY"
-  | "FRIDAY"
-  | "SATURDAY"
-  | "SUNDAY";
-
-type LoanStatus =
-  | "ACTIVE"
-  | "OVERDUE"
-  | "PAID_OFF";
-
-type PaymentStatus =
-  | "PAID"
-  | "PARTIAL"
-  | "UNPAID";
-
-interface Location {
-  district: "Cuddalore" | "Puducherry";
-  city: string;
-  street: string;
-}
-
-interface SeedCustomer {
-  id: string;
-  preferredPaymentDay: Weekday;
-  createdBy: string;
-  district: "Cuddalore" | "Puducherry";
-  city: string;
-}
-
-interface SeedLoan {
-  id: string;
-  customerId: string;
-  weeklyPayableAmount: number;
-  totalWeeks: number;
-  status: LoanStatus;
-  issuedAt: Date;
-}
-
-interface SeedTrack {
-  id: string;
-  loanId: string;
-  weekNumber: number;
-  targetAmount: number;
-  totalCollected: number;
-  status: PaymentStatus;
-}
-
-interface SeedUser {
-  id: string;
-}
-
-/* =========================================================
-   CONTROLLED LOCATIONS
-   ========================================================= */
-
-const LOCATIONS: Location[] = [
-  // Cuddalore
-  {
-    district: "Cuddalore",
-    city: "Cuddalore",
-    street: "Nethaji Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Cuddalore",
-    street: "Lawrence Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Cuddalore",
-    street: "Beach Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Cuddalore",
-    street: "Semmandalam Main Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Cuddalore",
-    street: "Manjakuppam Main Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Cuddalore",
-    street: "Imperial Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Panruti",
-    street: "Gandhi Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Panruti",
-    street: "Cuddalore Main Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Chidambaram",
-    street: "East Car Street",
-  },
-  {
-    district: "Cuddalore",
-    city: "Chidambaram",
-    street: "S.P. Koil Street",
-  },
-  {
-    district: "Cuddalore",
-    city: "Virudhachalam",
-    street: "Cuddalore Road",
-  },
-  {
-    district: "Cuddalore",
-    city: "Neyveli",
-    street: "Block 10 Main Road",
-  },
-
-  // Puducherry
-  {
-    district: "Puducherry",
-    city: "Puducherry",
-    street: "MG Road",
-  },
-  {
-    district: "Puducherry",
-    city: "Puducherry",
-    street: "Mission Street",
-  },
-  {
-    district: "Puducherry",
-    city: "Puducherry",
-    street: "Bussy Street",
-  },
-  {
-    district: "Puducherry",
-    city: "Puducherry",
-    street: "Anna Salai",
-  },
-  {
-    district: "Puducherry",
-    city: "Puducherry",
-    street: "Kamaraj Salai",
-  },
-  {
-    district: "Puducherry",
-    city: "Puducherry",
-    street: "Lawspet Main Road",
-  },
-  {
-    district: "Puducherry",
-    city: "Puducherry",
-    street: "Reddiarpalayam Main Road",
-  },
-  {
-    district: "Puducherry",
-    city: "Puducherry",
-    street: "Auroville Road",
-  },
-];
-
-/* =========================================================
-   HELPERS
-   ========================================================= */
-
-const WEEKDAYS: Weekday[] = [
+const WEEKDAYS = [
   "MONDAY",
   "TUESDAY",
   "WEDNESDAY",
@@ -210,643 +23,582 @@ const WEEKDAYS: Weekday[] = [
   "FRIDAY",
   "SATURDAY",
   "SUNDAY",
-];
+] as const;
 
-const CUSTOMER_FIRST_NAMES = [
-  "Arun",
-  "Praveen",
-  "Suresh",
-  "Karthik",
-  "Vignesh",
-  "Dinesh",
-  "Manoj",
-  "Ramesh",
-  "Sathish",
-  "Mohan",
-  "Bala",
-  "Saravanan",
-  "Vijay",
-  "Ajith",
-  "Gokul",
-  "Hari",
-  "Naveen",
-  "Ravi",
-  "Sanjay",
-  "Muthukumar",
-  "Surya",
-  "Ashok",
-  "Rajesh",
-  "Senthil",
-  "Murugan",
-];
-
-const CUSTOMER_LAST_NAMES = [
-  "Kumar",
-  "Raj",
-  "Babu",
-  "Prasad",
-  "Murugan",
-  "Raja",
-  "Mohan",
-  "Selvam",
-  "Nathan",
-  "Shankar",
-  "Das",
-];
-
-function randomItem<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)];
-}
-
-function randomInt(min: number, max: number): number {
-  return faker.number.int({
-    min,
-    max,
-  });
-}
-
-function randomAmount(
-  min: number,
-  max: number,
-  step = 5_000
-): number {
-  const count = Math.floor((max - min) / step);
-
-  return min + randomInt(0, count) * step;
-}
-
-function randomLocation(): Location {
-  return randomItem(LOCATIONS);
-}
-
-function randomCustomerName(): string {
-  return `${randomItem(
-    CUSTOMER_FIRST_NAMES
-  )} ${randomItem(CUSTOMER_LAST_NAMES)}`;
-}
-
-/**
- * Guaranteed unique Indian-looking phone number.
- *
- * We don't rely on Faker uniqueness here because
- * customers.phone_number has a UNIQUE constraint.
- */
-function customerPhone(index: number): string {
-  return `9${String(index).padStart(9, "0")}`;
-}
-
-function randomDateBetween(
-  minDaysAgo: number,
-  maxDaysAgo: number
-): Date {
-  const daysAgo = randomInt(
-    minDaysAgo,
-    maxDaysAgo
-  );
-
-  const date = new Date();
-
-  date.setDate(date.getDate() - daysAgo);
-
-  return date;
-}
-
-function todayWeekday(): Weekday {
-  const day = new Date().getDay();
-
-  const map: Weekday[] = [
-    "SUNDAY",
-    "MONDAY",
-    "TUESDAY",
-    "WEDNESDAY",
-    "THURSDAY",
-    "FRIDAY",
-    "SATURDAY",
-  ];
-
-  return map[day];
-}
-
-function getPaymentStatus(
-  collected: number,
-  target: number
-): PaymentStatus {
-  if (collected >= target) {
-    return "PAID";
-  }
-
-  if (collected > 0) {
-    return "PARTIAL";
-  }
-
-  return "UNPAID";
-}
-
-function generateCollection(
-  target: number,
-  status: PaymentStatus
-): number {
-  if (status === "PAID") {
-    return target;
-  }
-
-  if (status === "PARTIAL") {
-    return randomInt(
-      Math.floor(target * 0.2),
-      target - 1
-    );
-  }
-
-  return 0;
-}
-
-/* =========================================================
-   BULK INSERT HELPER
-   ========================================================= */
-
-/**
- * Inserts rows in batches.
- *
- * Example:
- *
- * INSERT INTO table (a,b,c)
- * VALUES
- *   ($1,$2,$3),
- *   ($4,$5,$6),
- *   ...
- */
-async function bulkInsert(
-  client: PoolClient,
-  table: string,
-  columns: string[],
-  rows: unknown[][],
-  batchSize: number,
-  casts: Record<number, string> = {}
-): Promise<void> {
-  if (rows.length === 0) {
-    return;
-  }
-
-  for (
-    let start = 0;
-    start < rows.length;
-    start += batchSize
-  ) {
-    const batch = rows.slice(
-      start,
-      start + batchSize
-    );
-
-    const values: unknown[] = [];
-    const placeholders: string[] = [];
-
-    let parameterIndex = 1;
-
-    for (const row of batch) {
-      const rowPlaceholders = row.map(
-        (_, columnIndex) => {
-          const cast = casts[columnIndex] ?? "";
-
-          const placeholder = `$${parameterIndex}${cast}`;
-
-          parameterIndex++;
-
-          return placeholder;
-        }
-      );
-
-      placeholders.push(
-        `(${rowPlaceholders.join(", ")})`
-      );
-
-      values.push(...row);
-    }
-
-    const query = `
-      INSERT INTO ${table} (
-        ${columns.join(", ")}
-      )
-      VALUES
-        ${placeholders.join(", ")}
-    `;
-
-    await client.query(query, values);
-
-    console.log(
-      `Inserted ${Math.min(
-        start + batch.length,
-        rows.length
-      )}/${rows.length} into ${table}`
-    );
-  }
-}
-
-/* =========================================================
-   USERS
-   ========================================================= */
-
-async function seedUsers(
-  client: PoolClient
-): Promise<SeedUser[]> {
-  const users: SeedUser[] = [];
-
-  const rows: unknown[][] = [];
-
-  for (let i = 0; i < EMPLOYEE_COUNT; i++) {
-    const id = faker.string.uuid();
-
-    rows.push([
-      id,
-      `Employee ${i + 1}`,
-      `8${String(i).padStart(9, "0")}`,
-      `employee${i + 1}@seed.local`,
-
-      /**
-       * Development-only placeholder.
-       *
-       * IMPORTANT:
-       * Don't use this password hash for production users.
-       */
-      "$2b$10$seedOnlyDevelopmentPasswordHash",
-
-      "USER",
-      true,
-      true,
-
-      5,
-      25,
-      2.5,
-      10,
-
-      ADMIN_ID,
-    ]);
-
-    users.push({
-      id,
-    });
-  }
-
-  await bulkInsert(
-    client,
-    "public.users",
-    [
-      "id",
-      "user_name",
-      "phone_number",
-      "email",
-      "password_hash",
-      "role",
-      "is_verified",
-      "is_active",
-      "default_upfront_fee_percentage",
-      "default_interest_percentage",
-      "default_total_months",
-      "default_total_weeks",
-      "admin_id",
+const LOCATIONS = [
+  {
+    city: "Cuddalore",
+    district: "Cuddalore",
+    streetNames: [
+      "Lawrence Road",
+      "Imperial Road",
+      "Manjakuppam",
+      "Thirupapuliyur",
+      "Nellikuppam Road",
+      "Semmandalam",
+      "Koothapakkam",
+      "Devanampattinam Road",
+      "Beach Road",
+      "OT Road",
     ],
-    rows,
-    1_000,
-    {
-      5: "::public.user_role",
-    }
-  );
+  },
+  {
+    city: "Puducherry",
+    district: "Puducherry",
+    streetNames: [
+      "Mission Street",
+      "MG Road",
+      "Bussy Street",
+      "Rangapillai Street",
+      "Eswaran Koil Street",
+      "Nehru Street",
+      "Lal Bahadur Shastri Street",
+      "Goubert Avenue",
+      "Suffren Street",
+      "Law de Lauriston Street",
+    ],
+  },
+] as const;
 
-  return users;
+function percentOf(amount: number, percent: number): number {
+  return Math.round((amount * percent) / 100);
 }
 
-/* =========================================================
-   CUSTOMERS
-   ========================================================= */
+function calculateTotalWeeks(totalMonths: number): number {
+  return Math.round(totalMonths * 4);
+}
+
+function addDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function weeksBetween(from: Date, to: Date): number {
+  return Math.floor(
+    (to.getTime() - from.getTime()) / (7 * 24 * 60 * 60 * 1000),
+  );
+}
+
+function minDate(first: Date, second: Date): Date {
+  return first.getTime() <= second.getTime() ? first : second;
+}
+
+interface AdminDefaults {
+  id: string;
+  default_upfront_fee_percentage: number;
+  default_interest_percentage: number;
+  default_total_months: number;
+}
+
+async function loadAdminDefaults(
+  pool = getPool(),
+): Promise<AdminDefaults> {
+  const result = await pool.query<AdminDefaults>(
+    `
+      SELECT
+        id,
+        default_upfront_fee_percentage,
+        default_interest_percentage,
+        default_total_months
+      FROM users
+      WHERE id = $1
+    `,
+    [TARGET_ADMIN_ID],
+  );
+
+  const admin = result.rows[0];
+
+  if (!admin) {
+    throw new Error(`No admin found with id ${TARGET_ADMIN_ID}`);
+  }
+
+  if (admin.default_upfront_fee_percentage == null) {
+    throw new Error(
+      `${TARGET_ADMIN_ID} has no upfront fee default. Pass an ADMIN id instead.`,
+    );
+  }
+
+  if (admin.default_interest_percentage == null) {
+    throw new Error(
+      `${TARGET_ADMIN_ID} has no interest default. Pass an ADMIN id instead.`,
+    );
+  }
+
+  return admin;
+}
+
+// ---------- wipe existing data for this admin ----------
+
+async function wipeAdminData(
+  pool = getPool(),
+): Promise<void> {
+  await pool.query(
+    `
+      DELETE FROM payments
+      WHERE loan_id IN (
+        SELECT id
+        FROM loans
+        WHERE owning_admin_id = $1
+      )
+    `,
+    [TARGET_ADMIN_ID],
+  );
+
+  await pool.query(
+    `
+      DELETE FROM repayment_tracks
+      WHERE loan_id IN (
+        SELECT id
+        FROM loans
+        WHERE owning_admin_id = $1
+      )
+    `,
+    [TARGET_ADMIN_ID],
+  );
+
+  await pool.query(
+    `DELETE FROM loans WHERE owning_admin_id = $1`,
+    [TARGET_ADMIN_ID],
+  );
+
+  await pool.query(
+    `DELETE FROM customers WHERE owning_admin_id = $1`,
+    [TARGET_ADMIN_ID],
+  );
+
+  console.log(
+    `Wiped loans, customers, payments, and tracks for admin ${TARGET_ADMIN_ID}`,
+  );
+}
+
+// ---------- customers ----------
+
+interface SeedCustomer {
+  id: string;
+}
 
 async function seedCustomers(
-  client: PoolClient,
-  users: SeedUser[]
+  pool: ReturnType<typeof getPool>,
 ): Promise<SeedCustomer[]> {
-  const customers: SeedCustomer[] = [];
-
-  const rows: unknown[][] = [];
-
-  const today = todayWeekday();
-
-  for (let i = 0; i < CUSTOMER_COUNT; i++) {
-    const id = faker.string.uuid();
-
-    /**
-     * First 20% are deliberately assigned today's
-     * payment weekday.
-     *
-     * This makes the dashboard useful immediately
-     * after seeding.
-     */
-    const isTodayCustomer =
-      i <
-      Math.floor(
-        CUSTOMER_COUNT *
-          TODAY_DUE_PERCENTAGE
-      );
-
-    const preferredPaymentDay =
-      isTodayCustomer
-        ? today
-        : randomItem(WEEKDAYS);
-
-    const location = randomLocation();
-
-    const createdBy =
-      users.length > 0
-        ? randomItem(users).id
-        : ADMIN_ID;
-
-    rows.push([
-      id,
-      randomCustomerName(),
-      customerPhone(i + 1),
-
-      null,
-
-      preferredPaymentDay,
-
-      new Date(),
-
-      createdBy,
-
-      new Date(),
-
-      ADMIN_ID,
-
-      location.street,
-      location.city,
-      location.district,
-    ]);
-
-    customers.push({
-      id,
-      preferredPaymentDay,
-      createdBy,
-      district: location.district,
-      city: location.city,
-    });
-  }
-
-  await bulkInsert(
-    client,
-    "public.customers",
-    [
-      "id",
-      "customer_name",
-      "phone_number",
-      "referred_by_id",
-      "preferred_payment_day",
-      "created_at",
-      "created_by",
-      "updated_at",
-      "owning_admin_id",
-      "street_name",
-      "city",
-      "district",
-    ],
-    rows,
-    CUSTOMER_BATCH_SIZE,
-    {
-      4: "::public.week",
-    }
+  const customerIds = Array.from(
+    { length: CUSTOMER_COUNT },
+    () => randomUUID(),
   );
 
-  return customers;
-}
+  for (
+    let batchStart = 0;
+    batchStart < CUSTOMER_COUNT;
+    batchStart += CUSTOMER_BATCH_SIZE
+  ) {
+    const batchEnd = Math.min(
+      batchStart + CUSTOMER_BATCH_SIZE,
+      CUSTOMER_COUNT,
+    );
 
-/* =========================================================
-   REFERRALS
-   ========================================================= */
+    const values: (string | null)[] = [];
+    const placeholders: string[] = [];
 
-async function seedReferrals(
-  client: PoolClient,
-  customerIds: string[]
-) {
-  console.log("Creating referrals...");
+    for (let i = batchStart; i < batchEnd; i++) {
+      const location = faker.helpers.arrayElement(LOCATIONS);
+      const street = faker.helpers.arrayElement(location.streetNames);
 
-  const referralCount = Math.floor(customerIds.length * 0.2);
+      const referredBy =
+        i > 0 && faker.number.int({ min: 1, max: 100 }) <= 10
+          ? customerIds[
+              faker.number.int({ min: 0, max: i - 1 })
+            ]
+          : null;
 
-  if (referralCount === 0) {
-    return;
-  }
+      const rowValues: (string | null)[] = [
+        customerIds[i],
+        faker.person.fullName(),
+        `+91${faker.string.numeric(10)}`,
+        referredBy,
+        faker.helpers.arrayElement(WEEKDAYS),
+        street,
+        location.city,
+        location.district,
+        TARGET_ADMIN_ID,
+        TARGET_ADMIN_ID,
+      ];
 
-  const referralPairs: Array<[string, string]> = [];
-
-  for (let i = 0; i < referralCount; i++) {
-    const customerId = customerIds[i];
-
-    // Pick a different customer as the referrer
-    let referrerId =
-      customerIds[Math.floor(Math.random() * customerIds.length)];
-
-    while (referrerId === customerId) {
-      referrerId =
-        customerIds[Math.floor(Math.random() * customerIds.length)];
-    }
-
-    referralPairs.push([customerId, referrerId]);
-  }
-
-  const BATCH_SIZE = 1000;
-
-  for (let i = 0; i < referralPairs.length; i += BATCH_SIZE) {
-    const batch = referralPairs.slice(i, i + BATCH_SIZE);
-
-    const values: string[] = [];
-    const params: string[] = [];
-
-    let paramIndex = 1;
-
-    for (const [customerId, referrerId] of batch) {
-      values.push(
-        `($${paramIndex}::uuid, $${paramIndex + 1}::uuid)`
+      const rowPlaceholders = rowValues.map(
+        (_, columnIndex) => `$${values.length + columnIndex + 1}`,
       );
 
-      params.push(customerId, referrerId);
-
-      paramIndex += 2;
+      placeholders.push(`(${rowPlaceholders.join(", ")})`);
+      values.push(...rowValues);
     }
 
-    await client.query(
+    await pool.query(
       `
-      UPDATE public.customers AS c
-      SET referred_by_id = refs.referrer_id
-      FROM (
-        VALUES ${values.join(", ")}
-      ) AS refs(customer_id, referrer_id)
-      WHERE c.id = refs.customer_id
+        INSERT INTO customers (
+          id,
+          customer_name,
+          phone_number,
+          referred_by_id,
+          preferred_payment_day,
+          street_name,
+          city,
+          district,
+          created_by,
+          owning_admin_id
+        )
+        VALUES ${placeholders.join(", ")}
       `,
-      params
+      values,
     );
 
-    console.log(
-      `Updated referrals: ${Math.min(
-        i + BATCH_SIZE,
-        referralPairs.length
-      )}/${referralPairs.length}`
-    );
+    console.log(`Customers inserted: ${batchEnd}/${CUSTOMER_COUNT}`);
   }
+
+  return customerIds.map((id) => ({ id }));
 }
-/* =========================================================
-   LOANS
-   ========================================================= */
 
-async function seedLoans(
-  client: PoolClient,
-  customers: SeedCustomer[]
-): Promise<SeedLoan[]> {
-  const loans: SeedLoan[] = [];
+// ---------- loan lifecycle simulation ----------
 
-  const rows: unknown[][] = [];
+type LoanOutcome =
+  | "PAID_ON_TIME"
+  | "PAID_LATE"
+  | "DEFAULTED"
+  | "STILL_OPEN";
 
-  const today = todayWeekday();
+interface SimulatedPayment {
+  weekNumber: number;
+  amountPaid: number;
+  paidAt: Date;
+}
 
-  /**
-   * Only ~85% of customers receive loans.
-   *
-   * Customers whose payment day is today are strongly
-   * biased toward getting an active/overdue loan.
-   */
-  for (const customer of customers) {
+interface SimulatedLoan {
+  issuedAt: Date;
+  closedAt: Date | null;
+  status: "ACTIVE" | "OVERDUE" | "PAID_OFF" | "DEFAULTED" | "CLOSED";
+  totalMonths: number;
+  totalWeeks: number;
+  nominalAmount: number;
+  upfrontFee: number;
+  disbursedAmount: number;
+  totalPayableAmount: number;
+  weeklyPayableAmount: number;
+  payments: SimulatedPayment[];
+}
+
+function simulateLoan(
+  issuedAt: Date,
+  admin: AdminDefaults,
+  outcome: LoanOutcome,
+  now: Date,
+): SimulatedLoan {
+  const nominalAmount = faker.helpers.arrayElement([
+    5000,
+    10000,
+    15000,
+    20000,
+    25000,
+    30000,
+    35000,
+    40000,
+  ]);
+
+  const totalMonths = faker.helpers.arrayElement([2, 2.5, 3]);
+  const totalWeeks = calculateTotalWeeks(totalMonths);
+
+  const upfrontFee = percentOf(
+    nominalAmount,
+    admin.default_upfront_fee_percentage,
+  );
+
+  const disbursedAmount = nominalAmount - upfrontFee;
+
+  const totalPayableAmount =
+    nominalAmount +
+    percentOf(nominalAmount, admin.default_interest_percentage);
+
+  const weeklyPayableAmount = Math.ceil(
+    totalPayableAmount / totalWeeks,
+  );
+
+  const elapsedWeeks = Math.max(0, weeksBetween(issuedAt, now));
+
+  const payments: SimulatedPayment[] = [];
+
+  let totalCollected = 0;
+  let closedAt: Date | null = null;
+  let status: SimulatedLoan["status"] = "ACTIVE";
+
+  // Open loans can have overdue-week payments, but only if those
+  // payments actually occurred by the current date.
+  const weeksToSimulate =
+    outcome === "STILL_OPEN"
+      ? elapsedWeeks
+      : totalWeeks + (outcome === "PAID_LATE" ? 3 : 0);
+
+  for (let week = 1; week <= weeksToSimulate; week++) {
+    // A defaulted customer stops paying partway through the loan.
     if (
-      Math.random() >
-      LOAN_CUSTOMER_PERCENTAGE
+      outcome === "DEFAULTED" &&
+      week > Math.floor(totalWeeks * 0.4)
     ) {
+      break;
+    }
+
+    // Keep every simulated payment on or before the current date.
+    const paidAt = addDays(
+      issuedAt,
+      week * 7 - faker.number.int({ min: 0, max: 2 }),
+    );
+
+    if (paidAt > now) {
+      break;
+    }
+
+    const roll = Math.random();
+
+    if (outcome === "STILL_OPEN" && roll < 0.12) {
+      // A missed week does not create a repayment track or payment.
       continue;
     }
 
-    const id = faker.string.uuid();
+    const amountPaid =
+      roll < 0.15
+        ? Math.max(
+            1,
+            Math.floor(
+              weeklyPayableAmount *
+                faker.number.float({ min: 0.3, max: 0.8 }),
+            ),
+          )
+        : weeklyPayableAmount;
 
-    const nominalAmount = randomAmount(
-      5_000,
-      50_000,
-      5_000
-    );
-
-    const upfrontFeePercentage = randomInt(
-      2,
-      5
-    );
-
-    const upfrontFee = Math.round(
-      nominalAmount *
-        (upfrontFeePercentage / 100)
-    );
-
-    const disbursedAmount =
-      nominalAmount - upfrontFee;
-
-    const totalWeeks = randomItem([
-      8,
-      10,
-      12,
-    ]);
-
-    const totalMonths =
-      totalWeeks / 4;
-
-    const interestPercentage = randomInt(
-      10,
-      20
-    );
-
-    const interestAmount = Math.round(
-      disbursedAmount *
-        (interestPercentage / 100)
-    );
-
-    const totalPayableAmount =
-      disbursedAmount + interestAmount;
-
-    const weeklyPayableAmount = Math.ceil(
-      totalPayableAmount / totalWeeks
-    );
-
-    /**
-     * Make today's borrowers mostly ACTIVE/OVERDUE.
-     */
-    let status: LoanStatus;
-
-    if (
-      customer.preferredPaymentDay === today
-    ) {
-      const roll = Math.random();
-
-      if (roll < 0.70) {
-        status = "ACTIVE";
-      } else {
-        status = "OVERDUE";
-      }
-    } else {
-      const roll = Math.random();
-
-      if (roll < 0.55) {
-        status = "ACTIVE";
-      } else if (roll < 0.75) {
-        status = "OVERDUE";
-      } else {
-        status = "PAID_OFF";
-      }
-    }
-
-    /**
-     * Keep loan age within the 10-week repayment
-     * period so that active loans have a valid
-     * repayment track.
-     *
-     * We use 14-60 days for active/overdue.
-     */
-    let issuedAt: Date;
-
-    if (
-      status === "ACTIVE" ||
-      status === "OVERDUE"
-    ) {
-      issuedAt = randomDateBetween(
-        7,
-        60
-      );
-    } else {
-      issuedAt = randomDateBetween(
-        75,
-        180
-      );
-    }
-
-    rows.push([
-      id,
-      customer.id,
-      nominalAmount,
-      upfrontFee,
-      disbursedAmount,
-      totalPayableAmount,
-      weeklyPayableAmount,
-      totalMonths,
-      totalWeeks,
-      status,
-      issuedAt,
-      ADMIN_ID,
-      new Date(),
-      ADMIN_ID,
-    ]);
-
-    loans.push({
-      id,
-      customerId: customer.id,
-      weeklyPayableAmount,
-      totalWeeks,
-      status,
-      issuedAt,
+    payments.push({
+      weekNumber: week,
+      amountPaid,
+      paidAt,
     });
+
+    totalCollected += amountPaid;
+
+    if (totalCollected >= totalPayableAmount) {
+      break;
+    }
   }
 
-  await bulkInsert(
-    client,
-    "public.loans",
+  // A loan is paid off only when actual simulated collections reach
+  // its total payable amount.
+  if (totalCollected >= totalPayableAmount) {
+    status = "PAID_OFF";
+
+    const lastPayment = payments[payments.length - 1];
+
+    closedAt = minDate(
+      addDays(
+        lastPayment.paidAt,
+        faker.number.int({ min: 0, max: 3 }),
+      ),
+      now,
+    );
+
+    if (outcome === "PAID_LATE" || Math.random() < 0.05) {
+      status = "CLOSED";
+    }
+  } else if (
+    outcome === "DEFAULTED" &&
+    elapsedWeeks > Math.floor(totalWeeks * 0.4)
+  ) {
+    // Only mark a default if sufficient time has passed for the
+    // simulated borrower to have stopped paying.
+    status = "DEFAULTED";
+
+    const lastPayment = payments[payments.length - 1];
+    const lastActivity = lastPayment?.paidAt ?? issuedAt;
+
+    closedAt = minDate(addDays(lastActivity, 28), now);
+  } else {
+    // OVERDUE is set only when a payment is actually collected
+    // after the loan's scheduled term.
+    const hasExtensionPayment = payments.some(
+      (payment) => payment.weekNumber > totalWeeks,
+    );
+
+    status = hasExtensionPayment ? "OVERDUE" : "ACTIVE";
+  }
+
+  return {
+    issuedAt,
+    closedAt,
+    status,
+    totalMonths,
+    totalWeeks,
+    nominalAmount,
+    upfrontFee,
+    disbursedAmount,
+    totalPayableAmount,
+    weeklyPayableAmount,
+    payments,
+  };
+}
+
+// ---------- generate customer loan histories ----------
+
+type SeedLoanPlan = {
+  id: string;
+  customerId: string;
+  loan: SimulatedLoan;
+};
+
+function buildLoansForCustomer(
+  customerId: string,
+  admin: AdminDefaults,
+  now: Date,
+): SeedLoanPlan[] {
+  // 10% of customers have never borrowed.
+  if (Math.random() < 0.1) {
+    return [];
+  }
+
+  const loanCount = faker.helpers.weightedArrayElement([
+    { value: 1, weight: 45 },
+    { value: 2, weight: 35 },
+    { value: 3, weight: 20 },
+  ]);
+
+  // Random first-loan date between August 1 and now.
+  const startTimestamp = LOAN_HISTORY_START_DATE.getTime();
+  const nowTimestamp = now.getTime();
+
+  const randomStartTimestamp =
+    startTimestamp +
+    Math.floor(
+      Math.random() * (nowTimestamp - startTimestamp + 1),
+    );
+
+  let cursor = new Date(randomStartTimestamp);
+
+  const plans: SeedLoanPlan[] = [];
+
+  for (let i = 0; i < loanCount; i++) {
+    const isLastLoan = i === loanCount - 1;
+
+    const outcome: LoanOutcome = isLastLoan
+      ? faker.helpers.weightedArrayElement([
+          { value: "STILL_OPEN" as const, weight: 55 },
+          { value: "PAID_ON_TIME" as const, weight: 25 },
+          { value: "PAID_LATE" as const, weight: 15 },
+          { value: "DEFAULTED" as const, weight: 5 },
+        ])
+      : faker.helpers.weightedArrayElement([
+          { value: "PAID_ON_TIME" as const, weight: 60 },
+          { value: "PAID_LATE" as const, weight: 30 },
+          { value: "DEFAULTED" as const, weight: 10 },
+        ]);
+
+    if (cursor >= now) {
+      break;
+    }
+
+    const loan = simulateLoan(cursor, admin, outcome, now);
+
+    plans.push({
+      id: randomUUID(),
+      customerId,
+      loan,
+    });
+
+    if (loan.closedAt) {
+      cursor = addDays(
+        loan.closedAt,
+        faker.number.int({ min: 7, max: 60 }),
+      );
+    } else {
+      // Do not issue another loan while the previous loan is open.
+      break;
+    }
+  }
+
+  return plans;
+}
+
+// ---------- batch database inserts ----------
+
+type DbValue = string | number | boolean | Date | null;
+
+async function insertRowsInBatches(
+  pool: ReturnType<typeof getPool>,
+  table: string,
+  columns: string[],
+  rows: DbValue[][],
+  batchSize = 500,
+): Promise<void> {
+  for (let start = 0; start < rows.length; start += batchSize) {
+    const batch = rows.slice(start, start + batchSize);
+    const values: DbValue[] = [];
+
+    const placeholders = batch.map((row, rowIndex) => {
+      if (row.length !== columns.length) {
+        throw new Error(`Invalid row length for ${table}`);
+      }
+
+      const offset = rowIndex * columns.length;
+      values.push(...row);
+
+      return `(${row
+        .map((_, columnIndex) => `$${offset + columnIndex + 1}`)
+        .join(", ")})`;
+    });
+
+    await pool.query(
+      `
+        INSERT INTO ${table} (${columns.join(", ")})
+        VALUES ${placeholders.join(", ")}
+      `,
+      values,
+    );
+
+    console.log(
+      `${table}: ${Math.min(start + batch.length, rows.length)}/${rows.length}`,
+    );
+  }
+}
+
+async function seedLoansInBatches(
+  pool: ReturnType<typeof getPool>,
+  customers: SeedCustomer[],
+  admin: AdminDefaults,
+  now: Date,
+): Promise<void> {
+  console.log("Generating loan histories...");
+
+  const plans: SeedLoanPlan[] = [];
+
+  for (let i = 0; i < customers.length; i++) {
+    plans.push(
+      ...buildLoansForCustomer(customers[i].id, admin, now),
+    );
+
+    if (
+      (i + 1) % 1000 === 0 ||
+      i + 1 === customers.length
+    ) {
+      console.log(
+        `Histories generated: ${i + 1}/${customers.length}`,
+      );
+    }
+  }
+
+  console.log(
+    `Generated ${plans.length} loans. Inserting in batches...`,
+  );
+
+  // 1. Insert loans before their repayment tracks.
+  await insertRowsInBatches(
+    pool,
+    "loans",
     [
       "id",
       "customer_id",
+      "issued_by_admin_id",
+      "owning_admin_id",
       "nominal_amount",
       "upfront_fee",
       "disbursed_amount",
@@ -856,169 +608,65 @@ async function seedLoans(
       "total_weeks",
       "status",
       "issued_at",
-      "issued_by_admin_id",
-      "updated_at",
-      "owning_admin_id",
+      "closed_at",
     ],
-    rows,
+    plans.map(({ id, customerId, loan }) => [
+      id,
+      customerId,
+      TARGET_ADMIN_ID,
+      TARGET_ADMIN_ID,
+      loan.nominalAmount,
+      loan.upfrontFee,
+      loan.disbursedAmount,
+      loan.totalPayableAmount,
+      loan.weeklyPayableAmount,
+      loan.totalMonths,
+      loan.totalWeeks,
+      loan.status,
+      loan.issuedAt,
+      loan.closedAt,
+    ]),
     LOAN_BATCH_SIZE,
-    {
-      9: "::public.loan_status",
-    }
   );
 
-  return loans;
-}
+  // 2. Create tracks only for weeks that have a payment.
+  const tracks: DbValue[][] = [];
+  const payments: DbValue[][] = [];
 
-/* =========================================================
-   CALCULATE CURRENT WEEK
-   ========================================================= */
+  for (const { id: loanId, loan } of plans) {
+    for (const payment of loan.payments) {
+      const trackId = randomUUID();
 
-function getWeekNumber(
-  issuedAt: Date,
-  totalWeeks: number
-): number {
-  const now = new Date();
-
-  const difference =
-    now.getTime() -
-    issuedAt.getTime();
-
-  const daysElapsed =
-    difference /
-    (1000 * 60 * 60 * 24);
-
-  const week =
-    Math.floor(daysElapsed / 7) + 1;
-
-  return Math.max(
-    1,
-    Math.min(totalWeeks, week)
-  );
-}
-
-/* =========================================================
-   REPAYMENT TRACKS
-   ========================================================= */
-
-async function seedRepaymentTracks(
-  client: PoolClient,
-  loans: SeedLoan[]
-): Promise<SeedTrack[]> {
-  const tracks: SeedTrack[] = [];
-
-  const rows: unknown[][] = [];
-
-  for (const loan of loans) {
-    /**
-     * Generate all tracks.
-     *
-     * 10,000 customers × ~85% loans × 10 weeks
-     * ≈ 85,000 tracks.
-     */
-    for (
-      let weekNumber = 1;
-      weekNumber <= loan.totalWeeks;
-      weekNumber++
-    ) {
-      const id = faker.string.uuid();
-
-      let status: PaymentStatus;
-
-      /**
-       * For PAID_OFF loans all historical tracks
-       * are paid.
-       */
-      if (loan.status === "PAID_OFF") {
-        status = "PAID";
-      } else {
-        const currentWeek =
-          getWeekNumber(
-            loan.issuedAt,
-            loan.totalWeeks
-          );
-
-        /**
-         * Tracks before current week:
-         * mostly paid, but some overdue/partial.
-         */
-        if (weekNumber < currentWeek) {
-          const roll = Math.random();
-
-          if (roll < 0.75) {
-            status = "PAID";
-          } else if (roll < 0.90) {
-            status = "PARTIAL";
-          } else {
-            status = "UNPAID";
-          }
-        }
-
-        /**
-         * Current week:
-         * intentionally mixed so dashboard has
-         * paid/partial/unpaid customers.
-         */
-        else if (weekNumber === currentWeek) {
-          const roll = Math.random();
-
-          if (roll < 0.45) {
-            status = "PAID";
-          } else if (roll < 0.70) {
-            status = "PARTIAL";
-          } else {
-            status = "UNPAID";
-          }
-        }
-
-        /**
-         * Future tracks are unpaid.
-         */
-        else {
-          status = "UNPAID";
-        }
-      }
-
-      const totalCollected =
-        generateCollection(
-          loan.weeklyPayableAmount,
-          status
-        );
-
-      const isOverdued =
-        loan.status === "OVERDUE" &&
-        status !== "PAID" &&
-        weekNumber <=
-          getWeekNumber(
-            loan.issuedAt,
-            loan.totalWeeks
-          );
-
-      rows.push([
-        id,
-        loan.id,
-        weekNumber,
-        totalCollected,
+      tracks.push([
+        trackId,
+        loanId,
+        payment.weekNumber,
+        payment.amountPaid,
         loan.weeklyPayableAmount,
-        status,
-        isOverdued,
+        payment.amountPaid >= loan.weeklyPayableAmount
+          ? "PAID"
+          : "PARTIAL",
+        payment.weekNumber > loan.totalWeeks,
       ]);
 
-      tracks.push({
-        id,
-        loanId: loan.id,
-        weekNumber,
-        targetAmount:
-          loan.weeklyPayableAmount,
-        totalCollected,
-        status,
-      });
+      payments.push([
+        trackId,
+        loanId,
+        payment.amountPaid,
+        TARGET_ADMIN_ID,
+        payment.paidAt,
+      ]);
     }
   }
 
-  await bulkInsert(
-    client,
-    "public.repayment_tracks",
+  console.log(
+    `Generated ${tracks.length} repayment tracks and ${payments.length} payments.`,
+  );
+
+  // 3. Tracks must exist before payments reference them.
+  await insertRowsInBatches(
+    pool,
+    "repayment_tracks",
     [
       "id",
       "loan_id",
@@ -1028,304 +676,72 @@ async function seedRepaymentTracks(
       "status",
       "is_overdued",
     ],
-    rows,
+    tracks,
     TRACK_BATCH_SIZE,
-    {
-      5: "::public.payment_status",
-    }
   );
 
-  return tracks;
-}
-
-/* =========================================================
-   PAYMENTS
-   ========================================================= */
-
-async function seedPayments(
-  client: PoolClient,
-  tracks: SeedTrack[]
-): Promise<void> {
-  const rows: unknown[][] = [];
-
-  for (const track of tracks) {
-    if (track.totalCollected <= 0) {
-      continue;
-    }
-
-    /**
-     * Sometimes create multiple payments for a track.
-     * This makes payment data more realistic.
-     */
-    const createMultiplePayments =
-      Math.random() < 0.25;
-
-    if (!createMultiplePayments) {
-      rows.push([
-        faker.string.uuid(),
-        track.id,
-        track.loanId,
-        track.totalCollected,
-        randomDateBetween(0, 30),
-        ADMIN_ID,
-      ]);
-
-      continue;
-    }
-
-    const firstAmount = Math.floor(
-      track.totalCollected * 0.6
-    );
-
-    const secondAmount =
-      track.totalCollected -
-      firstAmount;
-
-    rows.push([
-      faker.string.uuid(),
-      track.id,
-      track.loanId,
-      firstAmount,
-      randomDateBetween(1, 30),
-      ADMIN_ID,
-    ]);
-
-    if (secondAmount > 0) {
-      rows.push([
-        faker.string.uuid(),
-        track.id,
-        track.loanId,
-        secondAmount,
-        randomDateBetween(0, 10),
-        ADMIN_ID,
-      ]);
-    }
-  }
-
-  await bulkInsert(
-    client,
-    "public.payments",
+  // 4. Insert payments.
+  await insertRowsInBatches(
+    pool,
+    "payments",
     [
-      "id",
       "track_id",
       "loan_id",
       "amount_paid",
-      "paid_at",
       "collected_by_admin_id",
+      "paid_at",
     ],
-    rows,
-    PAYMENT_BATCH_SIZE
+    payments,
+    PAYMENT_BATCH_SIZE,
+  );
+
+  console.log(
+    `Loan seeding complete: ${plans.length} loans, ` +
+      `${tracks.length} tracks, ${payments.length} payments.`,
   );
 }
 
-/* =========================================================
-   VALIDATION
-   ========================================================= */
+// ---------- main ----------
 
-async function printSeedSummary(
-  client: PoolClient
-): Promise<void> {
-  const result = await client.query(`
-    SELECT
-      (SELECT COUNT(*) FROM public.users
-       WHERE admin_id = '${ADMIN_ID}') AS users,
-
-      (SELECT COUNT(*) FROM public.customers
-       WHERE owning_admin_id = '${ADMIN_ID}') AS customers,
-
-      (SELECT COUNT(*) FROM public.loans
-       WHERE owning_admin_id = '${ADMIN_ID}') AS loans,
-
-      (SELECT COUNT(*)
-       FROM public.repayment_tracks rt
-       INNER JOIN public.loans l
-         ON l.id = rt.loan_id
-       WHERE l.owning_admin_id = '${ADMIN_ID}')
-       AS repayment_tracks,
-
-      (SELECT COUNT(*)
-       FROM public.payments p
-       INNER JOIN public.loans l
-         ON l.id = p.loan_id
-       WHERE l.owning_admin_id = '${ADMIN_ID}')
-       AS payments;
-  `);
-
-  console.log("");
-  console.log("======================================");
-  console.log("SEED SUMMARY");
-  console.log("======================================");
-
-  console.table(result.rows[0]);
-
-  console.log("======================================");
-}
-
-/* =========================================================
-   MAIN SEED
-   ========================================================= */
-
-async function seed(): Promise<void> {
-  const client = await pool.connect();
-
-  const startedAt = Date.now();
+async function main(): Promise<void> {
+  const pool = getPool();
 
   try {
-    console.log("");
-    console.log("======================================");
-    console.log("Starting database seed");
-    console.log(`Customers: ${CUSTOMER_COUNT}`);
-    console.log(`Admin: ${ADMIN_ID}`);
-    console.log("======================================");
-    console.log("");
+    const now = new Date();
 
-    await client.query("BEGIN");
-
-    /**
-     * Verify existing admin.
-     */
-    const adminResult = await client.query(
-      `
-      SELECT
-        id,
-        role,
-        is_active
-      FROM public.users
-      WHERE id = $1
-      `,
-      [ADMIN_ID]
-    );
-
-    if (adminResult.rowCount === 0) {
+    if (now < LOAN_HISTORY_START_DATE) {
       throw new Error(
-        `Admin ${ADMIN_ID} does not exist`
+        "The current date is before August 1, 2026. Update LOAN_HISTORY_START_DATE.",
       );
     }
 
-    if (
-      adminResult.rows[0].role !== "ADMIN"
-    ) {
-      throw new Error(
-        `${ADMIN_ID} is not an ADMIN`
-      );
-    }
+    const admin = await loadAdminDefaults(pool);
 
-    if (!adminResult.rows[0].is_active) {
-      throw new Error(
-        `${ADMIN_ID} is inactive`
-      );
-    }
+    // WARNING: this deletes existing data for TARGET_ADMIN_ID.
+    await wipeAdminData(pool);
 
-    console.log("Existing admin verified.");
+    console.log("Starting customer seeding...");
 
-    /**
-     * 1. Employees
-     */
-    console.log("");
+    const customers = await seedCustomers(pool);
+
     console.log(
-      `Creating ${EMPLOYEE_COUNT} employees...`
+      `Customer seeding complete: ${customers.length} customers.`,
     );
 
-    const users = await seedUsers(client);
-
-    /**
-     * 2. Customers
-     */
-    console.log("");
-    console.log(
-      `Creating ${CUSTOMER_COUNT} customers...`
+    await seedLoansInBatches(
+      pool,
+      customers,
+      admin,
+      now,
     );
 
-    const customers =
-      await seedCustomers(
-        client,
-        users
-      );
-
-    /**
-     * 3. Referrals
-     */
-    console.log("");
-    console.log("Creating referrals...");
-
-    await seedReferrals(
-      client,
-      customers.map((customer) => customer.id)
-    );
-
-    /**
-     * 4. Loans
-     */
-    console.log("");
-    console.log("Creating loans...");
-
-    const loans = await seedLoans(
-      client,
-      customers
-    );
-
-    /**
-     * 5. Repayment tracks
-     */
-    console.log("");
-    console.log(
-      "Creating repayment tracks..."
-    );
-
-    const tracks =
-      await seedRepaymentTracks(
-        client,
-        loans
-      );
-
-    /**
-     * 6. Payments
-     */
-    console.log("");
-    console.log("Creating payments...");
-
-    await seedPayments(
-      client,
-      tracks
-    );
-
-    /**
-     * Validate.
-     */
-    await printSeedSummary(client);
-
-    await client.query("COMMIT");
-
-    const elapsed =
-      (Date.now() - startedAt) / 1000;
-
-    console.log("");
-    console.log(
-      `Seed completed successfully in ${elapsed.toFixed(
-        2
-      )} seconds.`
-    );
-  } catch (error) {
-    await client.query("ROLLBACK");
-
-    console.error("");
-    console.error(
-      "======================================"
-    );
-    console.error(
-      "SEED FAILED - TRANSACTION ROLLED BACK"
-    );
-    console.error(
-      "======================================"
-    );
-    console.error(error);
-
-    process.exitCode = 1;
+    console.log("All seed data inserted successfully.");
   } finally {
-    client.release();
-
-    await pool.end();
+    await closePool();
   }
 }
 
-seed();
+main().catch((error) => {
+  console.error("Seeding failed:", error);
+  process.exitCode = 1;
+});
