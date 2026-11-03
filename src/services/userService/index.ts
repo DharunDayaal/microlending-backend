@@ -9,6 +9,7 @@ import {
   findReferralsByUserIdRepo,
   findCustomerAccessInfoRepo,
   getTodayDashboardSummaryRepo,
+  listUsersRepo,
 } from "../../repositories/userRepo";
 import { CreateUserSchema } from "../../schemas/userSchema";
 import { RequestingUser } from "../../types/authTypes";
@@ -171,4 +172,11 @@ export async function getTodayDashboardSummary(user: RequestingUser) {
       .toUpperCase(),
     ...summary,
   };
+}
+
+export async function listUsers(
+  filters: { page: number; limit: number; search?: string },
+  user: RequestingUser,
+) {
+  return listUsersRepo({ ...filters, ...getScope(user) });
 }
