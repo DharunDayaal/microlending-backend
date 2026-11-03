@@ -274,6 +274,10 @@ export async function listLoansRepo(
     values.push(filters.owning_admin_id);
     conditions.push(`l.owning_admin_id = $${values.length}`);
   }
+  if (filters.customer_created_by) {
+    values.push(filters.customer_created_by);
+    conditions.push(`u.created_by = $${values.length}`);
+  }
 
   const whereClause = conditions.length
     ? `WHERE ${conditions.join(" AND ")}`
@@ -307,7 +311,7 @@ export async function listCollectionsDueRepo(
   page: number,
   limit: number,
   preferredPaymentDay?: Weekday,
-  owningAdminId?: string,
+  scope: { owningAdminId?: string; createdBy?: string } = {},
 ): Promise<{
   rows: CollectionDueRow[];
   total: number;
@@ -325,9 +329,13 @@ export async function listCollectionsDueRepo(
     values.push(preferredPaymentDay);
     dayFilter = `AND u.preferred_payment_day = $1`;
   }
-  if (owningAdminId) {
-    values.push(owningAdminId);
+  if (scope.owningAdminId) {
+    values.push(scope.owningAdminId);
     dayFilter += ` AND l.owning_admin_id = $${values.length}`;
+  }
+  if (scope.createdBy) {
+    values.push(scope.createdBy);
+    dayFilter += ` AND u.created_by = $${values.length}`;
   }
 
   const summaryValues = [...values];
@@ -413,4 +421,13 @@ export async function setLoanClosedAtRepo(
     `UPDATE loans SET closed_at = now() WHERE id = $1 AND closed_at IS NULL`,
     [loanId],
   );
+}
+
+export async function clearLoanClosedAtRepo(
+  client: PoolClient,
+  loanId: string,
+): Promise<void> {
+  await client.query(`UPDATE loans SET closed_at = NULL WHERE id = $1`, [
+    loanId,
+  ]);
 }

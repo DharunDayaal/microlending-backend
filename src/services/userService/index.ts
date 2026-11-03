@@ -9,7 +9,6 @@ import {
   findReferralsByUserIdRepo,
   findCustomerAccessInfoRepo,
   getTodayDashboardSummaryRepo,
-  listUsersRepo,
 } from "../../repositories/userRepo";
 import { CreateUserSchema } from "../../schemas/userSchema";
 import { RequestingUser } from "../../types/authTypes";
@@ -102,10 +101,7 @@ export async function getUserLoans(
 ): Promise<Loan[]> {
   await requireCustomerAccess(id, user);
 
-  const rows = await findLoansByUserIdRepo(
-    id,
-    user.role === "USER" ? user.id : undefined,
-  );
+  const rows = await findLoansByUserIdRepo(id);
   if (rows === null) {
     throw new AppError(404, "User not found");
   }
@@ -175,11 +171,4 @@ export async function getTodayDashboardSummary(user: RequestingUser) {
       .toUpperCase(),
     ...summary,
   };
-}
-
-export async function listUsers(
-  filters: { page: number; limit: number; search?: string },
-  user: RequestingUser,
-) {
-  return listUsersRepo({ ...filters, ...getScope(user) });
 }

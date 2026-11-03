@@ -306,14 +306,8 @@ export async function updateUserRepo(
   return result.rows[0] ?? null;
 }
 
-/**
- * issuedBy: when set (employee), only loans issued by that user are returned.
- * The filter lives in the JOIN so a customer with no matching loans still
- * yields one row (loan_id = null) instead of looking like "not found".
- */
 export async function findLoansByUserIdRepo(
   userId: string,
-  issuedBy?: string,
 ): Promise<UserLoanRow[] | null> {
   const result = await getPool().query<UserLoanRow>(
     `
@@ -322,13 +316,11 @@ export async function findLoansByUserIdRepo(
         l.total_payable_amount, l.weekly_payable_amount, l.total_months, l.total_weeks,
         l.status, l.issued_at, l.closed_at
       FROM customers u
-      LEFT JOIN loans l
-        ON l.customer_id = u.id
-        AND ($2::uuid IS NULL OR l.issued_by_admin_id = $2::uuid)
+      LEFT JOIN loans l ON l.customer_id = u.id
       WHERE u.id = $1
       ORDER BY l.issued_at DESC
     `,
-    [userId, issuedBy ?? null],
+    [userId],
   );
 
   if (result.rows.length === 0) {
