@@ -16,7 +16,7 @@ export interface User {
   owning_admin_id: string;
   phone_number: string;
   referred_by_id: string | null;
-  preferred_payment_day: Week;
+  preferred_payment_day: Week | null;
   preferred_payment_time: String | null;
   street_name: string | null;
   city: string;
@@ -32,6 +32,7 @@ export interface GetUsersOnWeekdayPayload {
   weekday: Week;
   search?: string;
   owningAdminId?: string;
+  createdBy?: string;
 }
 
 export interface UpdateUserPayload {
@@ -44,6 +45,8 @@ export interface ListUsersFilters {
   search?: string;
   page: number;
   limit: number;
+  owningAdminId?: String;
+  createdBy?: string;
 }
 
 export interface UserLoanRow {

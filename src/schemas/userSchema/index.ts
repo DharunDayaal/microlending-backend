@@ -16,6 +16,14 @@ export const updateUserSchema = z.object({
   customer_name: z.string().min(1).optional(),
   phone_number: z.string().min(6).optional(),
   preferred_payment_day: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']).optional(),
-})
+});
+
+export const listUsersQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().trim().min(1).optional(),
+});
 
 export type CreateUserSchema = z.infer<typeof createUserSchema>;
+export type UpdateUserSchema = z.infer<typeof updateUserSchema>;
+export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;

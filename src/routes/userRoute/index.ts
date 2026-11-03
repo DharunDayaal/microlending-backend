@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { createUserSchema, updateUserSchema } from "../../schemas/userSchema";
+import { createUserSchema, listUsersQuerySchema, updateUserSchema } from "../../schemas/userSchema";
 import { validateBody } from "../../middleware/validateBody";
 import * as UserController from "../../controllers/userController";
+import { validateQuery } from "../../middleware/validateQuery";
 
 const userRouter = Router();
 
@@ -12,6 +13,7 @@ userRouter.post(
 );
 userRouter.get("/today-summary", UserController.getTodayDashboardSummary);
 userRouter.get("/weekday", UserController.getUsersOnWeekday);
+userRouter.get("/list", validateQuery(listUsersQuerySchema), UserController.listUsers);
 userRouter.get("/:id", UserController.getUserById);
 userRouter.patch(
   "/update/:userId",

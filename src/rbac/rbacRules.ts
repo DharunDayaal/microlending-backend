@@ -110,11 +110,16 @@ const rbacRules: RBACRule[] = [
   {
     method: "GET",
     path: "/api/users/referrals/:userId",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
   {
     method: "GET",
     path: "/api/users/loans/:userId",
+    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+  },
+  {
+    method: "GET",
+    path: "/api/users/list",
     roles: ["USER", "ADMIN", "SUPER_ADMIN"],
   },
 

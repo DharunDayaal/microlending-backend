@@ -7,7 +7,9 @@ import {
   updateUserRepo,
   findLoansByUserIdRepo,
   findReferralsByUserIdRepo,
+  findCustomerAccessInfoRepo,
   getTodayDashboardSummaryRepo,
+  listUsersRepo,
 } from "../../repositories/userRepo";
 import { CreateUserSchema } from "../../schemas/userSchema";
 import { RequestingUser } from "../../types/authTypes";
@@ -18,21 +20,51 @@ import {
   User,
 } from "../../types/userTypes";
 
-function assertCustomerAccess(customer: User, user: RequestingUser): void {
+type AccessInfo = { owning_admin_id: string; created_by: string };
+
+/**
+ * SUPER_ADMIN: everything. ADMIN: their team (owning_admin_id).
+ * USER (employee): only customers they created.
+ */
+function getScope(user: RequestingUser): {
+  owningAdminId?: string;
+  createdBy?: string;
+} {
+  return {
+    owningAdminId: user.role === "SUPER_ADMIN" ? undefined : user.teamId,
+    createdBy: user.role === "USER" ? user.id : undefined,
+  };
+}
+
+function assertCustomerAccess(
+  customer: AccessInfo,
+  user: RequestingUser,
+): void {
   if (user.role === "SUPER_ADMIN") return;
   if (customer.owning_admin_id !== user.teamId) {
     throw new AppError(403, "You don't have access to this customer's data");
   }
+  if (user.role === "USER" && customer.created_by !== user.id) {
+    throw new AppError(403, "You don't have access to this customer's data");
+  }
+}
+
+/** Cheap existence + access check (no profile aggregation). */
+async function requireCustomerAccess(
+  customerId: string,
+  user: RequestingUser,
+): Promise<void> {
+  const info = await findCustomerAccessInfoRepo(customerId);
+  if (!info) throw new AppError(404, "User not found");
+  assertCustomerAccess(info, user);
 }
 
 export async function createUser(
   payload: CreateUserSchema,
   createdBy: string,
-  owiningAdminId: string,
+  owningAdminId: string,
 ) {
-  const result = await createUserRepo(payload, createdBy, owiningAdminId);
-
-  return result;
+  return createUserRepo(payload, createdBy, owningAdminId);
 }
 
 export async function getUserById(userId: string, user: RequestingUser) {
@@ -48,17 +80,11 @@ export async function getUsersOnWeekday(
   payload: GetUsersOnWeekdayPayload,
   user: RequestingUser,
 ) {
-  const scopedPayload =
-    user.role === "SUPER_ADMIN"
-      ? payload
-      : { ...payload, owningAdminId: user.teamId };
-  return getUsersOnWeekdayRepo(scopedPayload);
+  return getUsersOnWeekdayRepo({ ...payload, ...getScope(user) });
 }
 
 export async function checkUserExistsByPhoneNumber(phoneNumber: string) {
-  const result = await checkUserExistsByPhoneNumberRepo(phoneNumber);
-
-  return result;
+  return checkUserExistsByPhoneNumberRepo(phoneNumber);
 }
 
 export async function updateUser(
@@ -66,11 +92,7 @@ export async function updateUser(
   payload: UpdateUserPayload,
   user: RequestingUser,
 ) {
-  const existing = await getUserByIdRepo(userId);
-  if (!existing) {
-    throw new AppError(404, "User not found");
-  }
-  assertCustomerAccess(existing, user);
+  await requireCustomerAccess(userId, user);
   return updateUserRepo(userId, payload);
 }
 
@@ -78,13 +100,12 @@ export async function getUserLoans(
   id: string,
   user: RequestingUser,
 ): Promise<Loan[]> {
-  const customer = await getUserByIdRepo(id);
-  if (!customer) {
-    throw new AppError(404, "User not found");
-  }
-  assertCustomerAccess(customer, user);
+  await requireCustomerAccess(id, user);
 
-  const rows = await findLoansByUserIdRepo(id);
+  const rows = await findLoansByUserIdRepo(
+    id,
+    user.role === "USER" ? user.id : undefined,
+  );
   if (rows === null) {
     throw new AppError(404, "User not found");
   }
@@ -113,13 +134,9 @@ export async function getUserReferrals(
   id: string,
   user: RequestingUser,
 ): Promise<User[]> {
-  const customer = await getUserByIdRepo(id);
-  if (!customer) {
-    throw new AppError(404, "User not found");
-  }
-  assertCustomerAccess(customer, user);
+  await requireCustomerAccess(id, user);
 
-  const rows = await findReferralsByUserIdRepo(id);
+  const rows = await findReferralsByUserIdRepo(id, getScope(user));
   if (rows === null) {
     throw new AppError(404, "User not found");
   }
@@ -137,22 +154,32 @@ function getOwningAdminId(user: RequestingUser) {
         throw new AppError(400, "User is not associated with an admin");
       return user.teamId;
     default:
-      throw new Error("Invalid user role");
+      throw new AppError(403, "Invalid user role");
   }
 }
 
 export async function getTodayDashboardSummary(user: RequestingUser) {
   const owningAdminId = getOwningAdminId(user);
-  const summary = await getTodayDashboardSummaryRepo(owningAdminId);
+  const createdBy = user.role === "USER" ? user.id : null;
+  const summary = await getTodayDashboardSummaryRepo(owningAdminId, createdBy);
 
-  const today = new Date();
+  const now = new Date();
   return {
-    date: today.toISOString().split("T")[0],
-    weekday: today
+    // en-CA formats as YYYY-MM-DD
+    date: now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
+    weekday: now
       .toLocaleDateString("en-us", {
         weekday: "long",
+        timeZone: "Asia/Kolkata",
       })
       .toUpperCase(),
     ...summary,
   };
+}
+
+export async function listUsers(
+  filters: { page: number; limit: number; search?: string },
+  user: RequestingUser,
+) {
+  return listUsersRepo({ ...filters, ...getScope(user) });
 }
