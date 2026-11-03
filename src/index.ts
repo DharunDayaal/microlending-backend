@@ -16,6 +16,7 @@ import reportRouter from "./routes/reportRoute";
 import { warmPool } from "./config/database";
 import { rbacAuth } from "./middleware/rbacAuth";
 import { apiRateLimitConfig } from "./middleware/rateLimiter";
+import analyticsRouter from "./routes/analyticsRoute";
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/users", rbacAuth, userRouter);
 app.use("/api/loans", rbacAuth, loanRouter);
 app.use("/api/reports", rbacAuth, reportRouter);
+app.use("/api/analytics", rbacAuth, analyticsRouter);
 
 app.use((_req, _res, next) => {
   next(new AppError(404, "Route not found"));

@@ -141,6 +141,67 @@ const rbacRules: RBACRule[] = [
   },
 ];
 
+// Analytics RBAC rules
+const ALL = ["SUPER_ADMIN", "ADMIN", "USER"] as const;
+const ADMINS = ["SUPER_ADMIN", "ADMIN"] as const;
+const SUPER = ["SUPER_ADMIN"] as const;
+
+const u = (p: string): RBACRule => ({
+  method: "GET",
+  path: `/api/analytics/user/${p}`,
+  roles: [...ALL],
+});
+const a = (p: string): RBACRule => ({
+  method: "GET",
+  path: `/api/analytics/admin/${p}`,
+  roles: [...ADMINS],
+});
+const s = (p: string): RBACRule => ({
+  method: "GET",
+  path: `/api/analytics/super-admin/${p}`,
+  roles: [...SUPER],
+});
+
+export const analyticsRbacRules: RBACRule[] = [
+  u("overview"),
+  u("collections/trend"),
+  u("collections/by-weekday"),
+  u("portfolio/aging"),
+  u("customers/risk"),
+  u("forecast/next-weeks"),
+  u("loans/maturing"),
+  u("referrals"),
+
+  a("overview"),
+  a("collections/trend"),
+  a("collections/by-weekday"),
+  a("portfolio/aging"),
+  a("portfolio/status"),
+  a("disbursements/trend"),
+  a("earnings/trend"),
+  a("forecast/cashflow"),
+  a("loans/maturing"),
+  a("payments/behaviour"),
+  a("customers/risk"),
+  a("customers/repeat"),
+  a("referrals/performance"),
+  a("geography"),
+  a("employees/performance"),
+  a("employees/:employeeId/summary"),
+
+  s("overview"),
+  s("admins/performance"),
+  s("admins/growth"),
+  s("collections/trend"),
+  s("earnings/trend"),
+  s("portfolio/aging"),
+  s("risk/concentration"),
+  s("employees/leaderboard"),
+  s("geography"),
+  s("accounts/summary"),
+  s("forecast/cashflow"),
+];
+
 function matchPath(pattern: string, actual: string): boolean {
   if (pattern === actual) return true;
 
@@ -165,7 +226,7 @@ export function getAllowedRoles(
   method: string,
   path: string,
 ): UserRole[] | null {
-  const rule = rbacRules.find(
+  const rule = [...rbacRules, ...analyticsRbacRules].find(
     (rule) => rule.method === method && matchPath(rule.path, path),
   );
 
