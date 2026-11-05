@@ -75,18 +75,6 @@ export interface RefreshToken {
   created_at: Date;
 }
 
-export interface CreateEmployeePayload {
-  user_name: string;
-  phone_number: string;
-  email?: string;
-  password_hash: string;
-  admin_id: string;
-  default_upfront_fee_percentage?: number;
-  default_interest_percentage?: number;
-  default_total_months?: number;
-  default_total_weeks?: number;
-}
-
 export interface RequestingUser {
   id: string;
   role: UserRole;

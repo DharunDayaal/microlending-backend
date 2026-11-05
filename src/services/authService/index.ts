@@ -23,7 +23,6 @@ import {
 import { getPool, withTransaction } from "../../config/database";
 import * as OtpRepository from "../../repositories/otpRepo";
 import {
-  CreateEmployeeSchema,
   LoginByEmailSchema,
   LoginByPhoneSchema,
   ResetPasswordSchema,
@@ -355,40 +354,5 @@ export async function revokeAllRefreshToken(
       getPool(),
       record.user_id,
     );
-  }
-}
-
-export async function createEmployee(
-  payload: CreateEmployeeSchema,
-  creator: RequestingUser,
-): Promise<AdminUserPublic> {
-  if (creator.role !== "ADMIN") {
-    throw new AppError(403, "Only admins can create employees");
-  }
-
-  const passwordHash = await hashPassword(payload.password);
-  const hasOverrides = payload.default_total_months !== undefined;
-
-  try {
-    const employee = await AuthRepository.createEmployeeRepo({
-      user_name: payload.user_name,
-      phone_number: payload.phone_number,
-      email: payload.email,
-      password_hash: passwordHash,
-      admin_id: creator.id,
-      default_upfront_fee_percentage: payload.default_upfront_fee_percentage,
-      default_interest_percentage: payload.default_interest_percentage,
-      default_total_months: payload.default_total_months,
-      default_total_weeks: hasOverrides
-        ? calculateTotalWeeks(payload.default_total_months!)
-        : undefined,
-    });
-    return toController(employee);
-  } catch (error) {
-    const code = (error as { code?: string }).code;
-    if (code === PG_UNIQUE_VIOLATION_ERROR_CODE) {
-      throw new AppError(409, "Email or phone number is already registered");
-    }
-    throw error;
   }
 }

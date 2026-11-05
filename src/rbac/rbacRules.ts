@@ -18,133 +18,127 @@ export const publicRoutes: RBACPublicRule[] = [
   { method: "POST", path: "/api/auth/refresh" },
 ] as const;
 
+const ALL = ["SUPER_ADMIN", "ADMIN", "USER"] as const;
+const ADMINS = ["SUPER_ADMIN", "ADMIN"] as const;
+const SUPER = ["SUPER_ADMIN"] as const;
+
 const rbacRules: RBACRule[] = [
   // Auth routes
   {
     method: "POST",
-    path: "/api/auth/create-employee",
-    roles: ["ADMIN"],
-  },
-  {
-    method: "POST",
     path: "/api/auth/logout",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
 
   // Admin routes
-  { method: "POST", path: "/api/admin/pending", roles: ["SUPER_ADMIN"] },
+  { method: "POST", path: "/api/admin/pending", roles: [...SUPER] },
   {
     method: "POST",
     path: "/api/admin/:adminId/verify",
-    roles: ["SUPER_ADMIN"],
+    roles: [...SUPER],
   },
   {
     method: "POST",
     path: "/api/admin/:adminId/deactivate",
-    roles: ["SUPER_ADMIN"],
+    roles: [...SUPER],
   },
 
   // Loan routes
   {
     method: "GET",
     path: "/api/loans/details/:loanId",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "POST",
     path: "/api/loans/issue",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "POST",
     path: "/api/loans/collect/payment/:loanId",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/loans/list",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "PATCH",
     path: "/api/loans/update/status/:loanId",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/loans/collections/due",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/loans/payments/:loanId",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/loans/today-summary",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
 
   // Users/Customers routes
   {
     method: "POST",
     path: "/api/users/create",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/users/weekday",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/users/:id",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "PATCH",
     path: "/api/users/update/:id",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/users/referrals/:userId",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/users/loans/:userId",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
   {
     method: "GET",
     path: "/api/users/list",
-    roles: ["USER", "ADMIN", "SUPER_ADMIN"],
+    roles: [...ALL],
   },
 
   // Reports routes
   {
     method: "GET",
     path: "/api/reports/cash-outstanding",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: [...ADMINS],
   },
   {
     method: "GET",
     path: "/api/reports/earnings",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: [...ADMINS],
   },
   {
     method: "GET",
     path: "/api/reports/overdue",
-    roles: ["ADMIN", "SUPER_ADMIN"],
+    roles: [...ADMINS],
   },
 ];
-
-// Analytics RBAC rules
-const ALL = ["SUPER_ADMIN", "ADMIN", "USER"] as const;
-const ADMINS = ["SUPER_ADMIN", "ADMIN"] as const;
-const SUPER = ["SUPER_ADMIN"] as const;
 
 const u = (p: string): RBACRule => ({
   method: "GET",
@@ -162,7 +156,7 @@ const s = (p: string): RBACRule => ({
   roles: [...SUPER],
 });
 
-export const analyticsRbacRules: RBACRule[] = [
+const analyticsRbacRules: RBACRule[] = [
   u("overview"),
   u("collections/trend"),
   u("collections/by-weekday"),
@@ -202,7 +196,7 @@ export const analyticsRbacRules: RBACRule[] = [
   s("forecast/cashflow"),
 ];
 
-export const profileRbacRules: RBACRule[] = [
+const profileRbacRules: RBACRule[] = [
   { method: "GET", path: "/api/me", roles: [...ALL] },
   { method: "PATCH", path: "/api/me", roles: [...ALL] },
   { method: "POST", path: "/api/me/phone", roles: [...ALL] },
@@ -220,6 +214,18 @@ export const profileRbacRules: RBACRule[] = [
 
   { method: "GET", path: "/api/settings/limits", roles: [...ALL] },
   { method: "PATCH", path: "/api/settings/limits", roles: [...SUPER] },
+];
+
+export const employeeRbacRules = [
+  { method: "POST", path: "/api/employees", roles: [...ADMINS] },
+  { method: "GET", path: "/api/employees", roles: [...ADMINS] },
+  { method: "GET", path: "/api/employees/:id", roles: [...ADMINS] },
+  {
+    method: "PATCH",
+    path: "/api/employees/:id/verification",
+    roles: [...ADMINS],
+  },
+  { method: "PATCH", path: "/api/employees/:id/active", roles: [...ADMINS] },
 ];
 
 function matchPath(pattern: string, actual: string): boolean {
@@ -246,9 +252,12 @@ export function getAllowedRoles(
   method: string,
   path: string,
 ): UserRole[] | null {
-  const rule = [...rbacRules, ...analyticsRbacRules, ...profileRbacRules].find(
-    (rule) => rule.method === method && matchPath(rule.path, path),
-  );
+  const rule = [
+    ...rbacRules,
+    ...analyticsRbacRules,
+    ...profileRbacRules,
+    ...employeeRbacRules,
+  ].find((rule) => rule.method === method && matchPath(rule.path, path));
 
   return rule?.roles ?? null;
 }
