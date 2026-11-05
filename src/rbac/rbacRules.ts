@@ -216,7 +216,7 @@ const profileRbacRules: RBACRule[] = [
   { method: "PATCH", path: "/api/settings/limits", roles: [...SUPER] },
 ];
 
-export const employeeRbacRules = [
+const employeeRbacRules = [
   { method: "POST", path: "/api/employees", roles: [...ADMINS] },
   { method: "GET", path: "/api/employees", roles: [...ADMINS] },
   { method: "GET", path: "/api/employees/:id", roles: [...ADMINS] },
@@ -226,6 +226,29 @@ export const employeeRbacRules = [
     roles: [...ADMINS],
   },
   { method: "PATCH", path: "/api/employees/:id/active", roles: [...ADMINS] },
+];
+
+const analyticsAdvancedRbacRules = [
+  { method: "GET", path: "/api/analytics/user/kpis/compare", roles: [...ALL] },
+  { method: "GET", path: "/api/analytics/user/insights", roles: [...ALL] },
+  {
+    method: "GET",
+    path: "/api/analytics/user/collections/calendar",
+    roles: [...ALL],
+  },
+
+  {
+    method: "GET",
+    path: "/api/analytics/admin/kpis/compare",
+    roles: [...ADMINS],
+  },
+  { method: "GET", path: "/api/analytics/admin/insights", roles: [...ADMINS] },
+  {
+    method: "GET",
+    path: "/api/analytics/admin/collections/calendar",
+    roles: [...ADMINS],
+  },
+  { method: "GET", path: "/api/analytics/admin/cohorts", roles: [...ADMINS] },
 ];
 
 function matchPath(pattern: string, actual: string): boolean {
@@ -257,6 +280,7 @@ export function getAllowedRoles(
     ...analyticsRbacRules,
     ...profileRbacRules,
     ...employeeRbacRules,
+    ...analyticsAdvancedRbacRules,
   ].find((rule) => rule.method === method && matchPath(rule.path, path));
 
   return rule?.roles ?? null;
