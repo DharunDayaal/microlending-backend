@@ -843,13 +843,11 @@ export async function getGeographyRepo(
 // Employees
 // ---------------------------------------------------------------------------
 
-// `users` has no known display-name column here, so read whichever exists.
+// users.user_name is the display name; email is optional, so fall back to phone.
 const USER_NAME = (alias: string) =>
-  `COALESCE(to_jsonb(${alias})->>'full_name', to_jsonb(${alias})->>'name', to_jsonb(${alias})->>'email')`;
+  `COALESCE(NULLIF(${alias}.user_name, ''), NULLIF(${alias}.email, ''), ${alias}.phone_number)`;
 
-export async function findEmployeeRepo(
-  id: string,
-): Promise<{
+export async function findEmployeeRepo(id: string): Promise<{
   id: string;
   name: string | null;
   admin_id: string | null;
@@ -971,7 +969,22 @@ export async function getAdminsPerformanceRepo(
     `
     WITH ${b},
     adm AS (
-      SELECT a.id, ${USER_NAME("a")} AS name FROM users a WHERE a.role = 'ADMIN'
+      SELECT a.id, ${USER_NAME("a")} AS name
+      FROM users a
+      WHERE (
+        -- admins are always listed (inactive ones only if they still own data)
+        a.role = 'ADMIN' AND (
+          a.is_active
+          OR EXISTS (SELECT 1 FROM loans l WHERE l.owning_admin_id = a.id)
+          OR EXISTS (SELECT 1 FROM customers c WHERE c.owning_admin_id = a.id)
+        )
+      ) OR (
+        -- a super admin appears only when it owns loans or customers itself
+        a.role = 'SUPER_ADMIN' AND (
+          EXISTS (SELECT 1 FROM loans l WHERE l.owning_admin_id = a.id)
+          OR EXISTS (SELECT 1 FROM customers c WHERE c.owning_admin_id = a.id)
+        )
+      )
     ),
     agg AS (
       SELECT owning_admin_id AS admin_id,
