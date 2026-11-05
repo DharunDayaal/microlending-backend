@@ -202,6 +202,26 @@ export const analyticsRbacRules: RBACRule[] = [
   s("forecast/cashflow"),
 ];
 
+export const profileRbacRules: RBACRule[] = [
+  { method: "GET", path: "/api/me", roles: [...ALL] },
+  { method: "PATCH", path: "/api/me", roles: [...ALL] },
+  { method: "POST", path: "/api/me/phone", roles: [...ALL] },
+  { method: "POST", path: "/api/me/password", roles: [...ALL] },
+  { method: "GET", path: "/api/me/sessions", roles: [...ALL] },
+  { method: "DELETE", path: "/api/me/sessions", roles: [...ALL] },
+  { method: "DELETE", path: "/api/me/sessions/:id", roles: [...ALL] },
+  { method: "GET", path: "/api/me/stats", roles: [...ALL] }, // scope checked in service
+  { method: "PATCH", path: "/api/me/defaults", roles: [...ADMINS] },
+  { method: "GET", path: "/api/me/team", roles: [...ADMINS] },
+
+  { method: "GET", path: "/api/admins", roles: [...SUPER] },
+  { method: "PATCH", path: "/api/admins/:id/verification", roles: [...SUPER] },
+  { method: "PATCH", path: "/api/admins/:id/active", roles: [...SUPER] },
+
+  { method: "GET", path: "/api/settings/limits", roles: [...ALL] },
+  { method: "PATCH", path: "/api/settings/limits", roles: [...SUPER] },
+];
+
 function matchPath(pattern: string, actual: string): boolean {
   if (pattern === actual) return true;
 
@@ -226,7 +246,7 @@ export function getAllowedRoles(
   method: string,
   path: string,
 ): UserRole[] | null {
-  const rule = [...rbacRules, ...analyticsRbacRules].find(
+  const rule = [...rbacRules, ...analyticsRbacRules, ...profileRbacRules].find(
     (rule) => rule.method === method && matchPath(rule.path, path),
   );
 
