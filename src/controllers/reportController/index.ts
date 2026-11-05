@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import * as ReportService from "../../services/reportService";
-import { AppError, successResponse } from "../../helpers";
+import { successResponse } from "../../helpers";
 import { OverdueLoansQuerySchema } from "../../schemas/reportSchema";
 
 export async function cashOutstanding(
@@ -9,7 +9,7 @@ export async function cashOutstanding(
   next: NextFunction,
 ) {
   try {
-    const report = await ReportService.getCashOutstanding();
+    const report = await ReportService.getCashOutstanding(req.user!);
 
     successResponse(
       200,
@@ -28,7 +28,7 @@ export async function earnings(
   next: NextFunction,
 ) {
   try {
-    const report = await ReportService.getEarnings();
+    const report = await ReportService.getEarnings(req.user!);
 
     successResponse(
       200,
@@ -48,7 +48,11 @@ export async function overdueLoans(
 ) {
   try {
     const { page, limit } = res.locals.query as OverdueLoansQuerySchema;
-    const { rows, total } = await ReportService.getOverdueLoans(page, limit);
+    const { rows, total } = await ReportService.getOverdueLoans(
+      page,
+      limit,
+      req.user!,
+    );
 
     successResponse(
       200,

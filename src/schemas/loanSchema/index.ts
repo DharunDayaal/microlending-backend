@@ -29,7 +29,7 @@ export const listLoansQuerySchema = z.object({
 
 // The PAID_OFF will be handled inside collectPayment, no manual override of status to PAID_OFF is allowed
 export const updateLoanStatusSchema = z.object({
-  status: z.enum(["ACTIVE", "OVERDUE", "DEFAULTED", "CLOSED"]),
+  status: z.enum(["ACTIVE", "DEFAULTED", "CLOSED"]),
 });
 
 export const collectionsDueQuerySchema = z.object({

@@ -16,10 +16,6 @@ export async function createUser(
   try {
     const payload: CreateUserSchema = req.body;
 
-    if (!payload.created_at) {
-      payload.created_at = new Date();
-    }
-
     const user = await UserService.createUser(
       payload,
       req.user!.id,
@@ -45,15 +41,8 @@ export async function getUserById(
   next: NextFunction,
 ) {
   try {
-    const userId = req.params.id;
-
-    const user = await UserService.getUserById(userId, req.user!);
-
-    if (!user) {
-      failureResponse(404, res, "User not found");
-      return;
-    }
-
+    // service throws 404 / 403 itself
+    const user = await UserService.getUserById(req.params.id, req.user!);
     successResponse(200, res, { user }, "User retrieved successfully");
   } catch (error) {
     next(error);
@@ -149,7 +138,7 @@ export async function updateUser(
   } catch (error) {
     const code = (error as { code?: string }).code;
     if (code === PG_UNIQUE_VIOLATION_ERROR_CODE) {
-      throw new AppError(409, "Phone number is already registered");
+      return next(new AppError(409, "Phone number is already registered"));
     }
     next(error);
   }
@@ -194,15 +183,46 @@ export async function getTodayDashboardSummary(
   next: NextFunction,
 ) {
   try {
-    const user = req.user!;
-
-    const dashboard = await UserService.getTodayDashboardSummary(user);
+    const dashboard = await UserService.getTodayDashboardSummary(req.user!);
 
     successResponse(
       200,
       res,
       { dashboard },
-      "Dashboard summary retrived successfully",
+      "Dashboard summary retrieved successfully",
+    );
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listUsers(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const { page, limit, search } = res.locals.query as {
+      page: number;
+      limit: number;
+      search?: string;
+    };
+    const { rows, total } = await UserService.listUsers(
+      { page, limit, search },
+      req.user!,
+    );
+    successResponse(
+      200,
+      res,
+      {
+        users: rows,
+        metadata: {
+          current_page: page,
+          limit,
+          has_next_page: page * limit < total,
+        },
+      },
+      "Users retrieved successfully",
     );
   } catch (error) {
     next(error);

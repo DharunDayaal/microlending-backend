@@ -7,7 +7,6 @@ import {
   loginByEmailSchema,
   loginByPhoneSchema,
   refreshTokenSchema,
-  createEmployeeSchema,
   resetPasswordSchema,
 } from "../../schemas/authSchema";
 import { validateBody } from "../../middleware/validateBody";
@@ -57,13 +56,6 @@ router.post(
   "/logout",
   validateBody(refreshTokenSchema),
   AuthController.logout,
-);
-
-router.post(
-  "/create-employee",
-  validateBody(createEmployeeSchema),
-  rbacAuth,
-  AuthController.createEmployee,
 );
 
 export default router;

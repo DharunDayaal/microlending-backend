@@ -3,7 +3,6 @@ import { getPool } from "../../config/database";
 import {
   AdminUser,
   CreateAdminPayload,
-  CreateEmployeePayload,
 } from "../../types/authTypes";
 
 export async function createAdminRepo(
@@ -82,31 +81,4 @@ export async function updatePasswordRepo(
     passwordHash,
     adminId,
   ]);
-}
-
-export async function createEmployeeRepo(
-  payload: CreateEmployeePayload,
-): Promise<AdminUser> {
-  const result = await getPool().query(
-    `
-      INSERT INTO users (
-        user_name, phone_number, email, password_hash, role, admin_id, is_verified, is_active, default_upfront_fee_percentage, default_interest_percentage, default_total_months, default_total_weeks
-      )
-      VALUES ($1, $2, $3, $4, 'USER', $5, true, true, $6, $7, $8, $9)
-      RETURNING *
-    `,
-    [
-      payload.user_name,
-      payload.phone_number,
-      payload.email ?? null,
-      payload.password_hash,
-      payload.admin_id,
-      payload.default_upfront_fee_percentage,
-      payload.default_interest_percentage,
-      payload.default_total_months,
-      payload.default_total_weeks,
-    ],
-  );
-
-  return result.rows[0];
 }

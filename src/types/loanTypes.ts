@@ -81,12 +81,13 @@ export interface ListLoansFilters {
   search?: string;
   issued_from?: Date;
   issued_to?: Date;
+  customer_created_by?: string;
   page: number;
   limit: number;
 }
 
 export interface LoanListRow extends Loan {
-  user_name: string;
+  customer_name: string;
   phone_number: string;
   total_collected: number;
   total: number;
@@ -100,7 +101,7 @@ export interface LoanDetailRow extends Loan {
 }
 
 export interface CollectionDueLoan extends Loan {
-  user_name: string;
+  customer_name: string;
   phone_number: string;
   preferred_payment_day: Weekday | null;
   total_collected: number;
@@ -110,7 +111,7 @@ export interface CollectionDueLoan extends Loan {
 }
 
 export interface CollectionDueRow extends Loan {
-  user_name: string;
+  customer_name: string;
   phone_number: string;
   preferred_payment_day: Weekday | null;
   total_collected: number;
@@ -118,7 +119,7 @@ export interface CollectionDueRow extends Loan {
 }
 
 export interface ActiveLoanRow extends Loan {
-  user_name: string;
+  customer_name: string;
   phone_number: string;
   preferred_payment_day: Weekday | null;
 }

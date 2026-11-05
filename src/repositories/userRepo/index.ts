@@ -11,26 +11,27 @@ import {
   UserLoanRow,
 } from "../../types/userTypes";
 
+export type CustomerScope = { owningAdminId?: string; createdBy?: string };
+
 export async function createUserRepo(
   payload: CreateUserSchema,
   createdBy: string,
-  owiningAdminId: string,
+  owningAdminId: string,
 ): Promise<User> {
   const result = await getPool().query(
     `
-      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_at, created_by, owning_admin_id, street_name, city, district)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_by, owning_admin_id, street_name, city, district)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `,
     [
       payload.customer_name,
       payload.phone_number,
-      payload.referred_by_id,
-      payload.preferred_payment_day,
-      payload.created_at,
+      payload.referred_by_id ?? null,
+      payload.preferred_payment_day ?? null,
       createdBy,
-      owiningAdminId,
-      payload.street_name,
+      owningAdminId,
+      payload.street_name ?? null,
       payload.city,
       payload.district,
     ],
@@ -55,7 +56,6 @@ export async function getUsersOnWeekdayRepo(
   // 1. Weekday filter
   if (payload.weekday !== undefined && payload.weekday !== null) {
     values.push(payload.weekday);
-
     conditions.push(`preferred_payment_day = $${values.length}`);
   }
 
@@ -87,22 +87,27 @@ export async function getUsersOnWeekdayRepo(
   // 3. Owning admin filter
   if (payload.owningAdminId) {
     values.push(payload.owningAdminId);
-
     conditions.push(`owning_admin_id = $${values.length}`);
+  }
+
+  // 4. Creator filter (employees only see customers they created)
+  if (payload.createdBy) {
+    values.push(payload.createdBy);
+    conditions.push(`created_by = $${values.length}`);
   }
 
   if (conditions.length === 0) {
     conditions.push("1=1");
   }
 
-  // 4. Pagination
+  // 5. Pagination
   values.push(payload.limit);
   const limitIndex = values.length;
 
   values.push(payload.startIndex);
   const offsetIndex = values.length;
 
-  // 5. Ranking
+  // 6. Ranking
   let orderBy = `created_at DESC`;
 
   if (hasSearch && searchParamIndex !== null) {
@@ -125,13 +130,14 @@ export async function getUsersOnWeekdayRepo(
         phone_number,
         referred_by_id,
         preferred_payment_day,
+        preferred_payment_time,
         created_at,
         owning_admin_id,
         created_by,
         street_name,
         city,
         district
-      FROM customers 
+      FROM customers
       WHERE ${conditions.join(" AND ")}
       ORDER BY ${orderBy}
       LIMIT $${limitIndex}
@@ -143,19 +149,31 @@ export async function getUsersOnWeekdayRepo(
   return result.rows;
 }
 
-// 1. Define what the database actually returns (flat columns)
+/**
+ * Lightweight lookup used only for access checks (and loan-issue ownership).
+ */
+export async function findCustomerAccessInfoRepo(customerId: string): Promise<{
+  id: string;
+  owning_admin_id: string;
+  created_by: string;
+} | null> {
+  const result = await getPool().query(
+    `SELECT id, owning_admin_id, created_by FROM customers WHERE id = $1`,
+    [customerId],
+  );
+  return result.rows[0] ?? null;
+}
 
 export async function getUserByIdRepo(
   userId: string,
 ): Promise<CustomerProfile | null> {
-  // 2. Type the query with the flat structure
   const result = await getPool().query<FlatCustomerProfile>(
     `
     SELECT c.*, r.customer_name AS referred_by_name,
-    CASE 
-      WHEN r.id IS NULL THEN NULL 
-      WHEN EXISTS ( SELECT 1 FROM loans WHERE customer_id = r.id AND status IN ('OVERDUE', 'DEFAULTED') ) THEN 'NEEDS_ATTENTION' 
-      ELSE 'GOOD_STANDING' 
+    CASE
+      WHEN r.id IS NULL THEN NULL
+      WHEN EXISTS ( SELECT 1 FROM loans WHERE customer_id = r.id AND status IN ('OVERDUE', 'DEFAULTED') ) THEN 'NEEDS_ATTENTION'
+      ELSE 'GOOD_STANDING'
     END AS referred_by_standing,
     COALESCE(credit.on_time_count, 0) AS on_time_count,
     COALESCE(credit.delayed_count, 0) AS delayed_count,
@@ -169,22 +187,22 @@ export async function getUserByIdRepo(
     FROM customers c
     LEFT JOIN customers r ON r.id = c.referred_by_id
     LEFT JOIN LATERAL (
-      SELECT 
+      SELECT
         COUNT(*) FILTER (WHERE l.status = 'DEFAULTED') AS default_count,
         COUNT(*) FILTER (
-          WHERE l.status IN ('PAID_OFF', 'CLOSED') 
+          WHERE l.status IN ('PAID_OFF', 'CLOSED', 'OVERDUE')
           AND EXISTS (SELECT 1 FROM repayment_tracks rt WHERE rt.loan_id = l.id AND rt.is_overdued)
         ) AS delayed_count,
         COUNT(*) FILTER (
           WHERE (l.status IN ('PAID_OFF', 'CLOSED') AND NOT EXISTS (SELECT 1 FROM repayment_tracks rt WHERE rt.loan_id = l.id AND rt.is_overdued))
-          OR (l.status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM repayment_tracks rt WHERE rt.loan_id = l.id AND rt.is_overdued))
+            OR (l.status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM repayment_tracks rt WHERE rt.loan_id = l.id AND rt.is_overdued))
         ) AS on_time_count,
         COUNT(*) AS total_loans
       FROM loans l
       WHERE l.customer_id = c.id
     ) credit ON true
     LEFT JOIN LATERAL (
-      SELECT 
+      SELECT
         COUNT(*) AS total_referred,
         COUNT(*) FILTER (
           WHERE EXISTS (SELECT 1 FROM loans WHERE customer_id = ref_c.id AND status IN ('ACTIVE', 'OVERDUE'))
@@ -203,7 +221,6 @@ export async function getUserByIdRepo(
   const row = result.rows[0];
   if (!row) return null;
 
-  // 3. Destructure out the flat analytics columns and collect user properties
   const {
     on_time_count,
     delayed_count,
@@ -217,7 +234,6 @@ export async function getUserByIdRepo(
     ...userProperties
   } = row;
 
-  // 4. Return the strictly typed nested object, explicitly casting database numbers
   return {
     ...userProperties,
     credit_history: {
@@ -270,7 +286,11 @@ export async function updateUserRepo(
   }
 
   if (fields.length === 0) {
-    return getUserByIdRepo(userId);
+    const result = await getPool().query(
+      `SELECT * FROM customers WHERE id = $1`,
+      [userId],
+    );
+    return result.rows[0] ?? null;
   }
 
   values.push(userId);
@@ -311,16 +331,23 @@ export async function findLoansByUserIdRepo(
 
 export async function findReferralsByUserIdRepo(
   userId: string,
+  scope: CustomerScope = {},
 ): Promise<(User | null)[] | null> {
   const result = await getPool().query(
     `
-      SELECT r.id, r.customer_name, r.phone_number, r.referred_by_id, r.preferred_payment_day, r.created_at
+      SELECT r.id, r.customer_name, r.phone_number, r.referred_by_id,
+             r.preferred_payment_day, r.preferred_payment_time, r.created_at,
+             r.owning_admin_id, r.created_by,
+             r.street_name, r.city, r.district
       FROM customers u
-      LEFT JOIN customers r ON r.referred_by_id = u.id
+      LEFT JOIN customers r
+        ON r.referred_by_id = u.id
+        AND ($2::uuid IS NULL OR r.owning_admin_id = $2::uuid)
+        AND ($3::uuid IS NULL OR r.created_by = $3::uuid)
       WHERE u.id = $1
       ORDER BY r.created_at DESC
     `,
-    [userId],
+    [userId, scope.owningAdminId ?? null, scope.createdBy ?? null],
   );
 
   if (result.rows.length === 0) {
@@ -340,6 +367,14 @@ export async function listUsersRepo(
     conditions.push(
       `(customer_name ILIKE $${values.length} OR phone_number ILIKE $${values.length})`,
     );
+  }
+  if (filters.owningAdminId) {
+    values.push(filters.owningAdminId);
+    conditions.push(`owning_admin_id = $${values.length}`);
+  }
+  if (filters.createdBy) {
+    values.push(filters.createdBy);
+    conditions.push(`created_by = $${values.length}`);
   }
 
   const whereClause = conditions.length
@@ -366,12 +401,13 @@ export async function listUsersRepo(
 
 export async function getTodayDashboardSummaryRepo(
   owningAdminId: string | null,
+  createdBy: string | null,
 ): Promise<DashboardSummary> {
   const result = await getPool().query(
     `
-      SELECT * FROM get_today_dashboard_summary($1::uuid)
+      SELECT * FROM get_today_dashboard_summary($1::uuid, $2::uuid)
     `,
-    [owningAdminId],
+    [owningAdminId, createdBy],
   );
 
   const row = result.rows[0];

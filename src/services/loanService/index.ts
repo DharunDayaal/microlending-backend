@@ -5,6 +5,7 @@ import {
 } from "../../constants";
 import { AppError } from "../../helpers";
 import * as LoanRepository from "../../repositories/loanRepo";
+import { findCustomerAccessInfoRepo } from "../../repositories/userRepo";
 import { RequestingUser } from "../../types/authTypes";
 import {
   CollectionDueLoan,
@@ -18,11 +19,32 @@ import {
 } from "../../types/loanTypes";
 import { isPastDue } from "../../utils";
 
-function assertLoanAccess(loan: Loan, user: RequestingUser): void {
+async function assertLoanAccess(
+  loan: Loan,
+  user: RequestingUser,
+): Promise<void> {
   if (user.role === "SUPER_ADMIN") return;
   if (loan.owning_admin_id !== user.teamId) {
     throw new AppError(403, "You don't have access to this loan");
   }
+  // employees see every loan (whoever issued it) of customers they created
+  if (user.role === "USER") {
+    const customer = await findCustomerAccessInfoRepo(loan.customer_id);
+    if (!customer || customer.created_by !== user.id) {
+      throw new AppError(403, "You don't have access to this loan");
+    }
+  }
+}
+
+/** Scope applied to list-style queries. */
+function getLoanScope(user: RequestingUser): {
+  owningAdminId?: string;
+  createdBy?: string; // customers.created_by
+} {
+  return {
+    owningAdminId: user.role === "SUPER_ADMIN" ? undefined : user.teamId,
+    createdBy: user.role === "USER" ? user.id : undefined,
+  };
 }
 
 function deriveIsOverdue(
@@ -37,11 +59,37 @@ function deriveIsOverdue(
 
 const TERMINAL_STATUSES: LoanStatus[] = ["PAID_OFF", "CLOSED", "DEFAULTED"];
 
+// ACTIVE / OVERDUE are system-controlled (nightly job + collectPayment)
+const MANUAL_STATUSES: LoanStatus[] = ["DEFAULTED", "CLOSED"];
+
 export async function isCustomerLoanActive(
   customerId: string,
 ): Promise<boolean> {
   const loan = await LoanRepository.findActiveLoanByCustomerIdRepo(customerId);
   return loan !== null;
+}
+
+/**
+ * Checks the caller may issue a loan to this customer and returns the
+ * customer's owning_admin_id (the loan inherits it).
+ * ADMIN: customer must be in their team. USER: customer must be one they created.
+ */
+export async function assertCanIssueLoan(
+  customerId: string,
+  user: RequestingUser,
+): Promise<string> {
+  const customer = await findCustomerAccessInfoRepo(customerId);
+  if (!customer) throw new AppError(404, "Customer not found");
+  if (user.role !== "SUPER_ADMIN" && customer.owning_admin_id !== user.teamId) {
+    throw new AppError(403, "You don't have access to this customer");
+  }
+  if (user.role === "USER" && customer.created_by !== user.id) {
+    throw new AppError(
+      403,
+      "You can only issue loans to customers you created",
+    );
+  }
+  return customer.owning_admin_id;
 }
 
 export async function createLoan(payload: CreateLoanPayload): Promise<Loan> {
@@ -74,7 +122,7 @@ export async function collectPayment(
     if (!loan) {
       throw new AppError(404, "Loan not found");
     }
-    assertLoanAccess(loan, user);
+    await assertLoanAccess(loan, user);
 
     if (loan.status !== "ACTIVE" && loan.status !== "OVERDUE") {
       throw new AppError(
@@ -149,7 +197,7 @@ export async function getLoanById(
   if (!loan) {
     throw new AppError(404, "Loan not found");
   }
-  assertLoanAccess(loan, user);
+  await assertLoanAccess(loan, user);
 
   const outstandingBalance = loan.total_payable_amount - loan.total_collected;
 
@@ -171,10 +219,12 @@ export async function listLoans(
   filters: ListLoansFilters,
   user: RequestingUser,
 ) {
-  const scopedFilters =
-    user.role === "SUPER_ADMIN"
-      ? filters
-      : { ...filters, owning_admin_id: user.teamId };
+  const scope = getLoanScope(user);
+  const scopedFilters: ListLoansFilters = {
+    ...filters,
+    owning_admin_id: scope.owningAdminId,
+    customer_created_by: scope.createdBy,
+  };
   const { rows, total } = await LoanRepository.listLoansRepo(scopedFilters);
 
   const withOverdue = rows.map((row) => ({
@@ -194,7 +244,7 @@ export async function listTracks(
 ): Promise<RepaymentTrackResponse[]> {
   const loan = await LoanRepository.findLoanByIdRepo(loanId);
   if (!loan) throw new AppError(404, "Loan not found");
-  assertLoanAccess(loan, user);
+  await assertLoanAccess(loan, user);
   const tracks = await LoanRepository.listTracksByLoanIdRepo(loanId);
   return tracks.map((track) => ({
     ...track,
@@ -209,24 +259,71 @@ export async function updateLoanStatus(
 ): Promise<Loan> {
   const loan = await LoanRepository.findLoanByIdRepo(loanId);
   if (!loan) throw new AppError(404, "Loan not found");
-  assertLoanAccess(loan, user);
+  await assertLoanAccess(loan, user);
 
-  if (loan.status === "PAID_OFF" && status !== "CLOSED") {
-    throw new AppError(400, "A paid-off loan can only be moved to CLOSED");
+  const isReopen = status === "ACTIVE";
+  const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
+
+  if (isReopen && !isAdmin) {
+    throw new AppError(403, "Only admins can reopen a loan");
   }
-  return withTransaction(async (client) => {
-    await LoanRepository.updateLoanStatusRepo(client, loanId, status);
-    if (TERMINAL_STATUSES.includes(status) && !loan.closed_at) {
-      await LoanRepository.setLoanClosedAtRepo(client, loanId);
+  if (!isReopen && !MANUAL_STATUSES.includes(status)) {
+    throw new AppError(
+      400,
+      "Status can only be set to ACTIVE, DEFAULTED or CLOSED manually",
+    );
+  }
+  if (loan.status === status) {
+    throw new AppError(400, `Loan is already ${status.toLowerCase()}`);
+  }
+
+  if (isReopen) {
+    if (loan.status !== "DEFAULTED" && loan.status !== "CLOSED") {
+      throw new AppError(
+        400,
+        "Only a defaulted or closed loan can be reopened",
+      );
     }
-    return {
-      ...loan,
-      status,
-      closed_at: TERMINAL_STATUSES.includes(status)
-        ? new Date()
-        : loan.closed_at,
-    };
-  });
+    const totals = await LoanRepository.getLoanTotalsRepo(loanId);
+    if (totals.total_collected >= loan.total_payable_amount) {
+      throw new AppError(400, "A fully repaid loan cannot be reopened");
+    }
+  } else {
+    if (loan.status === "CLOSED") {
+      throw new AppError(400, "A closed loan cannot be changed");
+    }
+    if (loan.status === "PAID_OFF" && status !== "CLOSED") {
+      throw new AppError(400, "A paid-off loan can only be moved to CLOSED");
+    }
+  }
+
+  try {
+    return await withTransaction(async (client) => {
+      await LoanRepository.updateLoanStatusRepo(client, loanId, status);
+
+      if (isReopen) {
+        await LoanRepository.clearLoanClosedAtRepo(client, loanId);
+        return { ...loan, status, closed_at: null };
+      }
+
+      if (TERMINAL_STATUSES.includes(status) && !loan.closed_at) {
+        await LoanRepository.setLoanClosedAtRepo(client, loanId);
+      }
+      return {
+        ...loan,
+        status,
+        closed_at: TERMINAL_STATUSES.includes(status)
+          ? new Date()
+          : loan.closed_at,
+      };
+    });
+  } catch (error) {
+    // partial unique index: one ACTIVE/OVERDUE loan per customer
+    if ((error as { code?: string }).code === PG_UNIQUE_VIOLATION_ERROR_CODE) {
+      throw new AppError(400, "Customer already has another active loan");
+    }
+    throw error;
+  }
 }
 
 export async function listCollectionsDue(
@@ -248,7 +345,7 @@ export async function listCollectionsDue(
     page,
     limit,
     preferredPaymentDay,
-    user.role === "SUPER_ADMIN" ? undefined : user.teamId,
+    getLoanScope(user),
   );
 
   const mappedRows = rows.map((loan) => {
@@ -271,6 +368,6 @@ export async function listPayments(
 ) {
   const loan = await LoanRepository.findLoanByIdRepo(loanId);
   if (!loan) throw new AppError(404, "Loan not found");
-  assertLoanAccess(loan, user);
+  await assertLoanAccess(loan, user);
   return LoanRepository.listPaymentsByLoanIdRepo(loanId, page, limit);
 }
