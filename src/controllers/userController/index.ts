@@ -15,18 +15,16 @@ export async function createUser(
   next: NextFunction,
 ) {
   try {
-    if (req.user!.role === "SUPER_ADMIN") {
-      throw new AppError(
-        403,
-        "Super admins can't create customers. Sign in as the admin who will own the customer",
-      );
-    }
     const payload: CreateUserSchema = req.body;
+    const owningAdminId = await UserService.resolveOwningAdminId(
+      req.user!,
+      payload.admin_id,
+    );
 
     const user = await UserService.createUser(
       payload,
       req.user!.id,
-      req.user!.teamId,
+      owningAdminId,
       auditContext(req),
     );
 
