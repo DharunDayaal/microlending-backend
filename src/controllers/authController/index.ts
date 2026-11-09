@@ -11,6 +11,7 @@ import {
   VerifyOtpSchema,
 } from "../../schemas/authSchema";
 import * as OtpService from "../../services/otpService";
+import { auditContext } from "../../services/auditService";
 
 export async function register(
   req: Request,
@@ -20,7 +21,7 @@ export async function register(
   try {
     const payload = req.body as RegisterSchema;
 
-    const admin = await AuthService.registerAdmin(payload);
+    const admin = await AuthService.registerAdmin(payload, auditContext(req));
 
     successResponse(
       201,
@@ -68,7 +69,7 @@ export async function loginByEmail(
 ) {
   try {
     const payload = req.body as LoginByEmailSchema;
-    const result = await AuthService.loginByEmail(payload);
+    const result = await AuthService.loginByEmail(payload, auditContext(req));
     successResponse(200, res, result, "Login successful");
   } catch (error) {
     next(error);
@@ -82,7 +83,10 @@ export async function loginByPhone(
 ) {
   try {
     const payload = req.body as LoginByPhoneSchema;
-    const result = await AuthService.loginByPhoneNumber(payload);
+    const result = await AuthService.loginByPhoneNumber(
+      payload,
+      auditContext(req),
+    );
     successResponse(200, res, result, "Login successful");
   } catch (error) {
     next(error);
@@ -96,7 +100,7 @@ export async function resetPassword(
 ) {
   try {
     const payload = req.body as ResetPasswordSchema;
-    await AuthService.resetPassword(payload);
+    await AuthService.resetPassword(payload, auditContext(req));
     successResponse(200, res, {}, "Password reset successfully");
   } catch (error) {
     next(error);
@@ -110,7 +114,10 @@ export async function refreshTokens(
 ) {
   try {
     const { refresh_token } = req.body as RefreshTokenSchema;
-    const tokens = await AuthService.refreshTokens(refresh_token);
+    const tokens = await AuthService.refreshTokens(
+      refresh_token,
+      auditContext(req),
+    );
     successResponse(200, res, { tokens }, "Tokens refreshed successfully");
   } catch (error) {
     next(error);
@@ -120,7 +127,7 @@ export async function refreshTokens(
 export async function logout(req: Request, res: Response, next: NextFunction) {
   try {
     const { refresh_token } = req.body as RefreshTokenSchema;
-    await AuthService.revokeAllRefreshToken(refresh_token);
+    await AuthService.revokeAllRefreshToken(refresh_token, auditContext(req));
     successResponse(200, res, null, "Logged out successfully");
   } catch (error) {
     next(error);

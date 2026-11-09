@@ -10,6 +10,7 @@ import {
   findCustomerAccessInfoRepo,
   getTodayDashboardSummaryRepo,
   listUsersRepo,
+  findCustomerForUpdateRepo,
 } from "../../repositories/userRepo";
 import { CreateUserSchema } from "../../schemas/userSchema";
 import { RequestingUser } from "../../types/authTypes";
@@ -19,8 +20,12 @@ import {
   UpdateUserPayload,
   User,
 } from "../../types/userTypes";
+import { withTransaction } from "../../config/database";
+import { AUDIT } from "../../constants/auditActions";
+import { changedValues, recordAudit } from "../../services/auditService";
 
 type AccessInfo = { owning_admin_id: string; created_by: string };
+type AuditMeta = Record<string, unknown>;
 
 /**
  * SUPER_ADMIN: everything. ADMIN: their team (owning_admin_id).
@@ -59,12 +64,45 @@ async function requireCustomerAccess(
   assertCustomerAccess(info, user);
 }
 
+/** A referrer must be a customer of the same team. Other teams look like "not found". */
+async function assertReferrerInTeam(
+  referredById: string | null | undefined,
+  owningAdminId: string,
+): Promise<void> {
+  if (!referredById) return;
+  const referrer = await findCustomerAccessInfoRepo(referredById);
+  if (!referrer || referrer.owning_admin_id !== owningAdminId) {
+    throw new AppError(404, "Referring customer not found");
+  }
+}
+
 export async function createUser(
   payload: CreateUserSchema,
   createdBy: string,
   owningAdminId: string,
+  meta?: AuditMeta,
 ) {
-  return createUserRepo(payload, createdBy, owningAdminId);
+  await assertReferrerInTeam(payload.referred_by_id, owningAdminId);
+
+  return withTransaction(async (client) => {
+    const created = await createUserRepo(
+      payload,
+      createdBy,
+      owningAdminId,
+      client,
+    );
+
+    await recordAudit(client, {
+      action: AUDIT.CUSTOMER_CREATED,
+      actor_id: createdBy,
+      entity_type: "CUSTOMER",
+      entity_id: created.id,
+      owning_admin_id: owningAdminId,
+      new_value: { ...payload },
+      meta,
+    });
+    return created;
+  });
 }
 
 export async function getUserById(userId: string, user: RequestingUser) {
@@ -91,9 +129,35 @@ export async function updateUser(
   userId: string,
   payload: UpdateUserPayload,
   user: RequestingUser,
+  meta?: Record<string, unknown>,
 ) {
   await requireCustomerAccess(userId, user);
-  return updateUserRepo(userId, payload);
+
+  return withTransaction(async (client) => {
+    const before = await findCustomerForUpdateRepo(client, userId);
+    if (!before) return null;
+
+    const updated = await updateUserRepo(userId, payload, client);
+    if (!updated) return null;
+
+    const change = changedValues(
+      before,
+      updated as unknown as Record<string, unknown>,
+      Object.keys(payload),
+    );
+    if (change) {
+      await recordAudit(client, {
+        action: AUDIT.CUSTOMER_UPDATED,
+        actor_id: user.id,
+        entity_type: "CUSTOMER",
+        entity_id: userId,
+        owning_admin_id: before.owning_admin_id as string,
+        ...change,
+        meta,
+      });
+    }
+    return updated;
+  });
 }
 
 export async function getUserLoans(

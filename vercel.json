@@ -14,5 +14,6 @@
       "source": "/(.*)",
       "destination": "src/index.ts"
     }
-  ]
+  ],
+  "crons": [{ "path": "/health/ready", "schedule": "0 0 * * *" }]
 }

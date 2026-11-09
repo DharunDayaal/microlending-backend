@@ -18,6 +18,31 @@ import {
   Weekday,
 } from "../../types/loanTypes";
 import { isPastDue } from "../../utils";
+import type { PoolClient } from "pg";
+import { AUDIT } from "../../constants/auditActions";
+import { recordAudit } from "../../services/auditService";
+import { getLimitsRepo } from "../../repositories/profileRepo";
+
+type AuditMeta = Record<string, unknown>;
+
+function auditStatusChange(
+  client: PoolClient,
+  loan: Loan,
+  actorId: string,
+  next: { status: LoanStatus; closed_at: Date | null },
+  meta: Record<string, unknown>,
+) {
+  return recordAudit(client, {
+    action: AUDIT.LOAN_STATUS_CHANGED,
+    actor_id: actorId,
+    entity_type: "LOAN",
+    entity_id: loan.id,
+    owning_admin_id: loan.owning_admin_id,
+    old_value: { status: loan.status, closed_at: loan.closed_at ?? null },
+    new_value: next,
+    meta,
+  });
+}
 
 async function assertLoanAccess(
   loan: Loan,
@@ -92,9 +117,77 @@ export async function assertCanIssueLoan(
   return customer.owning_admin_id;
 }
 
-export async function createLoan(payload: CreateLoanPayload): Promise<Loan> {
+/** Checks a loan against the global limits set in /api/settings/limits. */
+export async function assertWithinLoanLimits(input: {
+  nominal_amount: number;
+  fee_percent: number;
+  interest_percent: number;
+  months: number;
+}): Promise<void> {
+  const l = await getLimitsRepo();
+
+  if (
+    input.nominal_amount < l.min_principal ||
+    input.nominal_amount > l.max_principal
+  ) {
+    throw new AppError(
+      400,
+      `Loan amount must be between ${l.min_principal} and ${l.max_principal}`,
+    );
+  }
+  if (input.months < l.min_months || input.months > l.max_months) {
+    throw new AppError(
+      400,
+      `Term must be between ${l.min_months} and ${l.max_months} months`,
+    );
+  }
+  if (input.fee_percent < 0 || input.fee_percent > l.max_fee_percent) {
+    throw new AppError(
+      400,
+      `Upfront fee must be between 0 and ${l.max_fee_percent}%`,
+    );
+  }
+  if (
+    input.interest_percent < 0 ||
+    input.interest_percent > l.max_interest_percent
+  ) {
+    throw new AppError(
+      400,
+      `Interest must be between 0 and ${l.max_interest_percent}%`,
+    );
+  }
+}
+
+export async function createLoan(
+  payload: CreateLoanPayload,
+  meta?: AuditMeta,
+): Promise<Loan> {
   try {
-    return await LoanRepository.createLoanRepo(payload);
+    return await withTransaction(async (client) => {
+      const loan = await LoanRepository.createLoanRepo(payload, client);
+
+      await recordAudit(client, {
+        action: AUDIT.LOAN_CREATED,
+        actor_id: payload.issued_by_admin_id,
+        entity_type: "LOAN",
+        entity_id: loan.id,
+        owning_admin_id: payload.owning_admin_id,
+        new_value: {
+          customer_id: payload.customer_id,
+          status: loan.status,
+          nominal_amount: payload.nominal_amount,
+          upfront_fee: payload.upfront_fee,
+          disbursed_amount: payload.disbursed_amount,
+          total_payable_amount: payload.total_payable_amount,
+          weekly_payable_amount: payload.weekly_payable_amount,
+          total_months: payload.total_months,
+          total_weeks: payload.total_weeks,
+          issued_at: payload.issued_at,
+        },
+        meta,
+      });
+      return loan;
+    });
   } catch (error) {
     const code = (error as { code?: string }).code;
     if (code === PG_FOREIGN_KEY_VIOLATION_ERROR_CODE) {
@@ -112,6 +205,7 @@ export async function collectPayment(
   weekNumber: number,
   amountPaid: number,
   user: RequestingUser,
+  meta?: AuditMeta,
 ): Promise<{ track: RepaymentTrackResponse; loan: Loan }> {
   return await withTransaction(async (client) => {
     if (amountPaid <= 0) {
@@ -128,6 +222,18 @@ export async function collectPayment(
       throw new AppError(
         400,
         `Cannot collect payment on a ${loan.status.toLowerCase()} loan`,
+      );
+    }
+
+    const collectedBefore = await LoanRepository.sumTotalCollectedForLoanRepo(
+      client,
+      loanId,
+    );
+    const outstanding = loan.total_payable_amount - collectedBefore;
+    if (amountPaid > outstanding) {
+      throw new AppError(
+        400,
+        `Amount exceeds the outstanding balance of ${outstanding}`,
       );
     }
 
@@ -156,7 +262,7 @@ export async function collectPayment(
         status,
       );
 
-    await LoanRepository.insertPaymentRepo(
+    const payment = await LoanRepository.insertPaymentRepo(
       client,
       track.id,
       loanId,
@@ -169,6 +275,27 @@ export async function collectPayment(
       0,
     );
 
+    await recordAudit(client, {
+      action: AUDIT.PAYMENT_RECORDED,
+      actor_id: user.id,
+      entity_type: "LOAN",
+      entity_id: loanId,
+      owning_admin_id: loan.owning_admin_id,
+      old_value: {
+        week_total_collected: track.total_collected,
+        week_status: track.status,
+      },
+      new_value: {
+        payment_id: payment.id,
+        week_number: weekNumber,
+        amount_paid: amountPaid,
+        week_total_collected: updateTrack.total_collected,
+        week_status: updateTrack.status,
+        remaining_balance: remainingBalance,
+      },
+      meta: { ...meta, past_term_week: weekIsPastTerm },
+    });
+
     const totalCollectedForLoan =
       await LoanRepository.sumTotalCollectedForLoanRepo(client, loanId);
 
@@ -177,9 +304,23 @@ export async function collectPayment(
       await LoanRepository.updateLoanStatusRepo(client, loanId, "PAID_OFF");
       await LoanRepository.setLoanClosedAtRepo(client, loanId);
       updatedLoan = { ...loan, status: "PAID_OFF", closed_at: new Date() };
+      await auditStatusChange(
+        client,
+        loan,
+        user.id,
+        { status: "PAID_OFF", closed_at: updatedLoan.closed_at ?? null },
+        { ...meta, source: "PAYMENT_COLLECTED" },
+      );
     } else if (loan.status === "ACTIVE" && weekIsPastTerm) {
       await LoanRepository.updateLoanStatusRepo(client, loanId, "OVERDUE");
       updatedLoan = { ...loan, status: "OVERDUE" };
+      await auditStatusChange(
+        client,
+        loan,
+        user.id,
+        { status: "OVERDUE", closed_at: loan.closed_at ?? null },
+        { ...meta, source: "PAYMENT_COLLECTED" },
+      );
     }
 
     return {
@@ -256,6 +397,7 @@ export async function updateLoanStatus(
   loanId: string,
   status: LoanStatus,
   user: RequestingUser,
+  meta?: AuditMeta,
 ): Promise<Loan> {
   const loan = await LoanRepository.findLoanByIdRepo(loanId);
   if (!loan) throw new AppError(404, "Loan not found");
@@ -263,6 +405,10 @@ export async function updateLoanStatus(
 
   const isReopen = status === "ACTIVE";
   const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
+
+  if (!isAdmin) {
+    throw new AppError(403, "Only admins can change a loan's status");
+  }
 
   if (isReopen && !isAdmin) {
     throw new AppError(403, "Only admins can reopen a loan");
@@ -299,23 +445,54 @@ export async function updateLoanStatus(
 
   try {
     return await withTransaction(async (client) => {
+      const locked = await LoanRepository.findLoanByIdForUpdateRepo(
+        client,
+        loanId,
+      );
+      if (!locked || locked.status !== loan.status) {
+        throw new AppError(
+          409,
+          "Loan was just updated. Please refresh and try again",
+        );
+      }
+
       await LoanRepository.updateLoanStatusRepo(client, loanId, status);
 
+      let updated: Loan;
       if (isReopen) {
         await LoanRepository.clearLoanClosedAtRepo(client, loanId);
-        return { ...loan, status, closed_at: null };
+        updated = { ...loan, status, closed_at: null };
+      } else {
+        if (TERMINAL_STATUSES.includes(status) && !loan.closed_at) {
+          await LoanRepository.setLoanClosedAtRepo(client, loanId);
+        }
+        updated = {
+          ...loan,
+          status,
+          closed_at: TERMINAL_STATUSES.includes(status)
+            ? (loan.closed_at ?? new Date()) // was: new Date()
+            : loan.closed_at,
+        };
       }
 
-      if (TERMINAL_STATUSES.includes(status) && !loan.closed_at) {
-        await LoanRepository.setLoanClosedAtRepo(client, loanId);
-      }
-      return {
-        ...loan,
-        status,
-        closed_at: TERMINAL_STATUSES.includes(status)
-          ? new Date()
-          : loan.closed_at,
-      };
+      // outstanding at the moment of the change matters for DEFAULTED / CLOSED
+      const totals = await LoanRepository.getLoanTotalsRepo(loanId);
+      await auditStatusChange(
+        client,
+        loan,
+        user.id,
+        { status: updated.status, closed_at: updated.closed_at ?? null },
+        {
+          ...meta,
+          source: "MANUAL",
+          reopened: isReopen,
+          outstanding_amount: Math.max(
+            loan.total_payable_amount - totals.total_collected,
+            0,
+          ),
+        },
+      );
+      return updated;
     });
   } catch (error) {
     // partial unique index: one ACTIVE/OVERDUE loan per customer

@@ -7,6 +7,7 @@ import {
   PG_FOREIGN_KEY_VIOLATION_ERROR_CODE,
   PG_UNIQUE_VIOLATION_ERROR_CODE,
 } from "../../constants";
+import { auditContext } from "../../services/auditService";
 
 export async function createUser(
   req: Request,
@@ -14,12 +15,19 @@ export async function createUser(
   next: NextFunction,
 ) {
   try {
+    if (req.user!.role === "SUPER_ADMIN") {
+      throw new AppError(
+        403,
+        "Super admins can't create customers. Sign in as the admin who will own the customer",
+      );
+    }
     const payload: CreateUserSchema = req.body;
 
     const user = await UserService.createUser(
       payload,
       req.user!.id,
       req.user!.teamId,
+      auditContext(req),
     );
 
     successResponse(201, res, { user }, "User created successfully");
@@ -86,14 +94,6 @@ export async function getUsersOnWeekday(
 
     const totalUsersLength = users.length;
 
-    if (totalUsersLength === 0) {
-      return failureResponse(
-        404,
-        res,
-        "No users found for the specified weekday",
-      );
-    }
-
     const hasNextPage = totalUsersLength > limit;
 
     if (hasNextPage) {
@@ -125,6 +125,7 @@ export async function updateUser(
       userId,
       payload,
       req.user!,
+      auditContext(req),
     );
     if (!updatedUser) {
       return failureResponse(404, res, "User not found");

@@ -16,6 +16,7 @@ import type {
   StatsQuerySchema,
   TeamQuerySchema,
 } from "../../schemas/profileSchema";
+import { auditContext } from "../../services/auditService";
 
 type Handler = (req: Request, res: Response) => Promise<void>;
 
@@ -43,19 +44,31 @@ export const getMe = wrap(async (req, res) => {
 
 export const updateMe = wrap(async (req, res) => {
   const payload = updateProfileSchema.parse(req.body);
-  const profile = await Service.updateProfile(req.user!, payload);
+  const profile = await Service.updateProfile(
+    req.user!,
+    payload,
+    auditContext(req),
+  );
   successResponse(200, res, { profile }, "Profile updated successfully");
 });
 
 export const changePhone = wrap(async (req, res) => {
   const payload = changePhoneSchema.parse(req.body);
-  const profile = await Service.changePhone(req.user!, payload);
+  const profile = await Service.changePhone(
+    req.user!,
+    payload,
+    auditContext(req),
+  );
   successResponse(200, res, { profile }, "Phone number updated successfully");
 });
 
 export const changePassword = wrap(async (req, res) => {
   const payload = changePasswordSchema.parse(req.body);
-  const result = await Service.changePassword(req.user!, payload);
+  const result = await Service.changePassword(
+    req.user!,
+    payload,
+    auditContext(req),
+  );
   successResponse(200, res, result, "Password changed successfully");
 });
 
@@ -65,12 +78,16 @@ export const listSessions = wrap(async (req, res) => {
 });
 
 export const revokeSession = wrap(async (req, res) => {
-  await Service.revokeSession(req.user!, idParam(req.params.id, "session id"));
+  await Service.revokeSession(
+    req.user!,
+    idParam(req.params.id, "session id"),
+    auditContext(req),
+  );
   successResponse(200, res, {}, "Session signed out successfully");
 });
 
 export const revokeAllSessions = wrap(async (req, res) => {
-  const result = await Service.revokeAllSessions(req.user!);
+  const result = await Service.revokeAllSessions(req.user!, auditContext(req));
   successResponse(200, res, result, "Signed out of all devices");
 });
 
@@ -81,7 +98,11 @@ export const getStats = wrap(async (req, res) => {
 
 export const updateDefaults = wrap(async (req, res) => {
   const payload = updateDefaultsSchema.parse(req.body);
-  const profile = await Service.updateDefaults(req.user!, payload);
+  const profile = await Service.updateDefaults(
+    req.user!,
+    payload,
+    auditContext(req),
+  );
   successResponse(200, res, { profile }, "Loan defaults updated successfully");
 });
 
@@ -114,6 +135,7 @@ export const setAdminVerification = wrap(async (req, res) => {
     req.user!,
     idParam(req.params.id, "admin id"),
     is_verified,
+    auditContext(req),
   );
   successResponse(200, res, { admin }, "Admin verification updated");
 });
@@ -124,6 +146,7 @@ export const setAdminActive = wrap(async (req, res) => {
     req.user!,
     idParam(req.params.id, "admin id"),
     is_active,
+    auditContext(req),
   );
   successResponse(200, res, { admin }, "Admin status updated");
 });

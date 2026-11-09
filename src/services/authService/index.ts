@@ -28,6 +28,47 @@ import {
   ResetPasswordSchema,
 } from "../../schemas/authSchema";
 import * as RefreshRepository from "../../repositories/refreshRepository";
+import { AUDIT } from "../../constants/auditActions";
+import { recordAudit, recordAuditSafe } from "../../services/auditService";
+
+type AuditMeta = Record<string, unknown>;
+type LoginMethod = "EMAIL" | "PHONE_OTP";
+
+function auditLoginFailed(
+  method: LoginMethod,
+  reason: string,
+  account: { id: string } | null,
+  identifier: string,
+  meta?: AuditMeta,
+): void {
+  recordAuditSafe(getPool(), {
+    action: AUDIT.LOGIN_FAILED,
+    actor_id: null,
+    target_id: account?.id ?? null,
+    // identifier is stored only when no account matched
+    meta: { ...meta, method, reason, ...(account ? {} : { identifier }) },
+  });
+}
+
+function auditLoginBlocked(
+  method: LoginMethod,
+  reason: "ACCOUNT_PENDING_APPROVAL" | "ACCOUNT_DEACTIVATED",
+  account: { id: string },
+  credentialsVerified: boolean,
+  meta?: AuditMeta,
+): void {
+  recordAuditSafe(getPool(), {
+    action: AUDIT.LOGIN_BLOCKED,
+    actor_id: null,
+    target_id: account.id,
+    meta: {
+      ...meta,
+      method,
+      reason,
+      credentials_verified: credentialsVerified,
+    },
+  });
+}
 
 function toController(
   admin: Awaited<ReturnType<typeof AuthRepository.createAdminRepo>>,
@@ -38,6 +79,7 @@ function toController(
 
 export async function registerAdmin(
   payload: RegisterAdminPayload,
+  meta?: AuditMeta,
 ): Promise<AdminUserPublic> {
   const passwordHash = await hashPassword(payload.password);
   const totalWeeks = calculateTotalWeeks(payload.default_total_months);
@@ -72,6 +114,25 @@ export async function registerAdmin(
       );
 
       await OtpRepository.markOtpConsumedRepo(client, verifiedOtp.id);
+
+      await recordAudit(client, {
+        action: AUDIT.ADMIN_REGISTERED,
+        actor_id: created.id,
+        target_id: created.id,
+        new_value: {
+          user_name: created.user_name,
+          phone_number: created.phone_number,
+          email: created.email,
+          role: created.role,
+          is_verified: created.is_verified,
+          default_upfront_fee_percentage:
+            payload.default_upfront_fee_percentage,
+          default_interest_percentage: payload.default_interest_percentage,
+          default_total_months: payload.default_total_months,
+        },
+        meta,
+      });
+
       return created;
     });
 
@@ -91,9 +152,11 @@ export async function registerAdmin(
 
 export async function loginByEmail(
   payload: LoginByEmailSchema,
+  meta?: AuditMeta,
 ): Promise<{ tokens: TokenPair; admin: AdminUserPublic }> {
   const admin = await AuthRepository.findAdminByEmailRepo(payload.email);
   if (!admin) {
+    auditLoginFailed("EMAIL", "UNKNOWN_ACCOUNT", null, payload.email, meta);
     throw new AppError(401, "Invalid email or password");
   }
 
@@ -102,10 +165,12 @@ export async function loginByEmail(
     admin.password_hash,
   );
   if (!isPasswordValid) {
+    auditLoginFailed("EMAIL", "WRONG_PASSWORD", admin, payload.email, meta);
     throw new AppError(401, "Invalid email or password");
   }
 
   if (!admin.is_verified) {
+    auditLoginBlocked("EMAIL", "ACCOUNT_PENDING_APPROVAL", admin, true, meta);
     throw new AppError(
       403,
       "Your account is pending approval from a super admin",
@@ -115,6 +180,7 @@ export async function loginByEmail(
   }
 
   if (!admin.is_active) {
+    auditLoginBlocked("EMAIL", "ACCOUNT_DEACTIVATED", admin, true, meta);
     throw new AppError(
       403,
       "Your account has been deactivated",
@@ -145,14 +211,29 @@ export async function loginByEmail(
 
 export async function loginByPhoneNumber(
   payload: LoginByPhoneSchema,
+  meta?: AuditMeta,
 ): Promise<{ tokens: TokenPair; admin: AdminUserPublic }> {
   const admin = await AuthRepository.findAdminByPhoneNumberRepo(
     payload.phone_number,
   );
   if (!admin) {
+    auditLoginFailed(
+      "PHONE_OTP",
+      "UNKNOWN_ACCOUNT",
+      null,
+      payload.phone_number,
+      meta,
+    );
     throw new AppError(401, "Invalid phone number or OTP");
   }
   if (!admin.is_verified) {
+    auditLoginBlocked(
+      "PHONE_OTP",
+      "ACCOUNT_PENDING_APPROVAL",
+      admin,
+      false,
+      meta,
+    );
     throw new AppError(
       403,
       "Your account is pending approval from a super admin",
@@ -161,6 +242,7 @@ export async function loginByPhoneNumber(
     );
   }
   if (!admin.is_active) {
+    auditLoginBlocked("PHONE_OTP", "ACCOUNT_DEACTIVATED", admin, false, meta);
     throw new AppError(
       403,
       "Your account has been deactivated",
@@ -214,6 +296,13 @@ export async function loginByPhoneNumber(
   });
 
   if (!outcome.ok) {
+    auditLoginFailed(
+      "PHONE_OTP",
+      outcome.message,
+      admin,
+      payload.phone_number,
+      meta,
+    );
     throw new AppError(outcome.status, outcome.message);
   }
 
@@ -238,6 +327,7 @@ export async function loginByPhoneNumber(
 
 export async function resetPassword(
   payload: ResetPasswordSchema,
+  meta?: AuditMeta,
 ): Promise<void> {
   const admin = payload.email
     ? await AuthRepository.findAdminByEmailRepo(payload.email)
@@ -256,12 +346,13 @@ export async function resetPassword(
   await withTransaction(async (client) => {
     // The OTP check always runs against the account's actual phone number
     // on file — even when the caller identified themselves by email.
-    const verifiedOtp = await OtpRepository.findVerifiedUncosumedOtpForUpdateRepo(
-      client,
-      admin.phone_number,
-      "RESET_PASSWORD",
-      validSince,
-    );
+    const verifiedOtp =
+      await OtpRepository.findVerifiedUncosumedOtpForUpdateRepo(
+        client,
+        admin.phone_number,
+        "RESET_PASSWORD",
+        validSince,
+      );
     if (!verifiedOtp) {
       throw new AppError(
         400,
@@ -276,10 +367,20 @@ export async function resetPassword(
     // same reasoning as the refresh-token-reuse case: a password reset
     // should kill any session started under the old password.
     await RefreshRepository.revokeAllRefreshTokensForUserRepo(client, admin.id);
+    await recordAudit(client, {
+      action: AUDIT.PASSWORD_RESET,
+      actor_id: admin.id,
+      target_id: admin.id,
+      new_value: { credential_updated: true, sessions_revoked: true },
+      meta: { ...meta, via: payload.email ? "EMAIL" : "PHONE" },
+    });
   });
 }
 
-export async function refreshTokens(refreshToken: string): Promise<TokenPair> {
+export async function refreshTokens(
+  refreshToken: string,
+  meta?: AuditMeta,
+): Promise<TokenPair> {
   const tokenHash = hashRefreshToken(refreshToken);
   const outcome = await withTransaction(async (client) => {
     const record = await RefreshRepository.findRefreshTokenByHashForUpdateRepo(
@@ -298,6 +399,13 @@ export async function refreshTokens(refreshToken: string): Promise<TokenPair> {
         client,
         record.user_id,
       );
+      await recordAudit(client, {
+        action: AUDIT.SESSIONS_REVOKED,
+        actor_id: record.user_id,
+        target_id: record.user_id,
+        new_value: { sessions_revoked: true, reason: "REFRESH_TOKEN_REUSE" },
+        meta,
+      });
       return {
         ok: false,
         status: 401,
@@ -346,9 +454,25 @@ export async function refreshTokens(refreshToken: string): Promise<TokenPair> {
 
 export async function revokeAllRefreshToken(
   refreshToken: string,
+  meta?: AuditMeta,
 ): Promise<void> {
   const tokenHash = hashRefreshToken(refreshToken);
   const record = await RefreshRepository.findRefreshTokenByHashRepo(tokenHash);
+  if (record && !record.revoked_at) {
+    await withTransaction(async (client) => {
+      await RefreshRepository.revokeAllRefreshTokensForUserRepo(
+        client,
+        record.user_id,
+      );
+      await recordAudit(client, {
+        action: AUDIT.SESSIONS_REVOKED,
+        actor_id: record.user_id,
+        target_id: record.user_id,
+        new_value: { sessions_revoked: true, reason: "LOGOUT_ALL" },
+        meta,
+      });
+    });
+  }
   if (record && !record.revoked_at) {
     await RefreshRepository.revokeAllRefreshTokensForUserRepo(
       getPool(),
