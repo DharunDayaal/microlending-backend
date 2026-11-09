@@ -434,3 +434,13 @@ export async function findCustomerForUpdateRepo(
   );
   return r.rows[0] ?? null;
 }
+
+/** True when the id is an active, verified ADMIN. */
+export async function findActiveAdminRepo(adminId: string): Promise<boolean> {
+  const result = await getPool().query(
+    `SELECT 1 FROM users
+      WHERE id = $1 AND role = 'ADMIN' AND is_active = true AND is_verified = true`,
+    [adminId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}

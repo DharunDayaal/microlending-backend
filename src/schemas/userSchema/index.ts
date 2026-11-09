@@ -4,7 +4,8 @@ import z from "zod";
 export const createUserSchema = z.object({
   customer_name: z.string().min(2, "User name is required"),
   phone_number: z.string().min(13, "Phone number is required"),
-  referred_by_id: z.string().optional(),
+  referred_by_id: z.uuid("Invalid referring customer id").optional(),
+  admin_id: z.string().uuid("Invalid admin id").optional(),                 
   preferred_payment_day: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']),
   created_at: z.date().optional(),
   street_name: z.string().optional(),

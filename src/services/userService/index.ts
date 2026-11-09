@@ -11,6 +11,7 @@ import {
   getTodayDashboardSummaryRepo,
   listUsersRepo,
   findCustomerForUpdateRepo,
+  findActiveAdminRepo,
 } from "../../repositories/userRepo";
 import { CreateUserSchema } from "../../schemas/userSchema";
 import { RequestingUser } from "../../types/authTypes";
@@ -243,4 +244,22 @@ export async function listUsers(
   user: RequestingUser,
 ) {
   return listUsersRepo({ ...filters, ...getScope(user) });
+}
+
+/**
+ * Which team a new customer belongs to.
+ * ADMIN / USER: their own team. SUPER_ADMIN: must name an active admin.
+ */
+export async function resolveOwningAdminId(
+  user: RequestingUser,
+  adminId?: string,
+): Promise<string> {
+  if (user.role !== "SUPER_ADMIN") return user.teamId;
+  if (!adminId) {
+    throw new AppError(400, "admin_id is required for super admins");
+  }
+  if (!(await findActiveAdminRepo(adminId))) {
+    throw new AppError(404, "Admin not found");
+  }
+  return adminId;
 }
