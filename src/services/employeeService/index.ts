@@ -10,6 +10,7 @@ import { calculateTotalWeeks } from "../../utils";
 import type { AdminUserPublic, RequestingUser } from "../../types/authTypes";
 import { AUDIT } from "../../constants/auditActions";
 import { recordAudit } from "../../services/auditService";
+import { findActiveAdminRepo } from "../../repositories/userRepo";
 
 type AuditMeta = Record<string, unknown>;
 
@@ -55,12 +56,21 @@ export async function createEmployee(
   creator: RequestingUser,
   meta?: Record<string, unknown>,
 ): Promise<AdminUserPublic> {
-  if (creator.role !== "ADMIN") {
-    throw new AppError(403, "Only admins can create employees");
-  }
-
   const passwordHash = await hashPassword(payload.password);
-
+  let adminId: string;
+  if (creator.role === "ADMIN") {
+    adminId = creator.id; // admins always create in their own team
+  } else if (creator.role === "SUPER_ADMIN") {
+    if (!payload.admin_id) {
+      throw new AppError(400, "admin_id is required for super admins");
+    }
+    if (!(await findActiveAdminRepo(payload.admin_id))) {
+      throw new AppError(404, "Admin not found");
+    }
+    adminId = payload.admin_id;
+  } else {
+    throw new AppError(403, "You don't have permission to create employees");
+  }
   try {
     const employee = await withTransaction(async (client) => {
       const created = await Repo.createEmployeeRepo(
@@ -69,7 +79,7 @@ export async function createEmployee(
           phone_number: payload.phone_number,
           email: payload.email,
           password_hash: passwordHash,
-          admin_id: creator.id,
+          admin_id: adminId,
           default_upfront_fee_percentage:
             payload.default_upfront_fee_percentage,
           default_interest_percentage: payload.default_interest_percentage,
