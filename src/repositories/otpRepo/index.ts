@@ -9,8 +9,9 @@ export async function createOtpRepo(
   otp: string,
   purpose: OtpPurpose,
   expiresAt: Date,
+  client: Pool | PoolClient = getPool(),
 ): Promise<OtpCode> {
-  const result = await getPool().query(
+  const result = await client.query(
     `
       INSERT INTO otp_codes (phone_number, otp_hash, purpose, expires_at)
       VALUES ($1, $2, $3, $4)
@@ -25,8 +26,9 @@ export async function createOtpRepo(
 export async function findLatestOtpRepo(
   phone_number: string,
   purpose: OtpPurpose,
+  client: Pool | PoolClient = getPool(),
 ): Promise<OtpCode | null> {
-  const result = await getPool().query(
+  const result = await client.query(
     `
       SELECT * FROM otp_codes
       WHERE phone_number = $1 AND purpose = $2
@@ -35,13 +37,31 @@ export async function findLatestOtpRepo(
     `,
     [phone_number, purpose],
   );
-
   return result.rows[0] ?? null;
 }
 
-export async function incrementOtpAttemptsRepo(client: Queryable, otpId: string): Promise<void> {
+export async function findLatestOtpForUpdateRepo(
+  client: PoolClient,
+  phoneNumber: string,
+  purpose: OtpPurpose,
+) {
+  const r = await client.query(
+    `SELECT * FROM otp_codes
+      WHERE phone_number = $1 AND purpose = $2
+      ORDER BY created_at DESC
+      LIMIT 1
+      FOR UPDATE`,
+    [phoneNumber, purpose],
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function incrementOtpAttemptsRepo(
+  client: Queryable,
+  otpId: string,
+): Promise<void> {
   console.log("Incrementing OTP attempts for OTP ID:", otpId);
- const result = await client.query(
+  const result = await client.query(
     `
       UPDATE otp_codes
       SET attempts = attempts + 1
@@ -54,7 +74,10 @@ export async function incrementOtpAttemptsRepo(client: Queryable, otpId: string)
   console.log("Updated OTP:", result.rows[0]);
 }
 
-export async function markOtpVerification(client: Queryable, otpId: string): Promise<void> {
+export async function markOtpVerification(
+  client: Queryable,
+  otpId: string,
+): Promise<void> {
   await client.query(
     `
       UPDATE otp_codes SET verified_at = now() WHERE id = $1

@@ -154,10 +154,11 @@ export async function listSessionsRepo(userId: string): Promise<SessionRow[]> {
 }
 
 export async function revokeSessionRepo(
+  client: Client,
   userId: string,
   sessionId: string,
 ): Promise<number> {
-  const response = await getPool().query(
+  const response = await client.query(
     `UPDATE refresh_tokens SET revoked_at = now()
       WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`,
     [sessionId, userId],

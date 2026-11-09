@@ -1,3 +1,4 @@
+import { Pool, PoolClient } from "pg";
 import { getPool } from "../../config/database";
 import { CreateUserSchema } from "../../schemas/userSchema";
 import {
@@ -17,8 +18,9 @@ export async function createUserRepo(
   payload: CreateUserSchema,
   createdBy: string,
   owningAdminId: string,
+  client: Pool | PoolClient = getPool(),
 ): Promise<User> {
-  const result = await getPool().query(
+  const result = await client.query(
     `
       INSERT INTO customers (customer_name, phone_number, referred_by_id, preferred_payment_day, created_by, owning_admin_id, street_name, city, district)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -268,6 +270,7 @@ export async function checkUserExistsByPhoneNumberRepo(
 export async function updateUserRepo(
   userId: string,
   payload: UpdateUserPayload,
+  client: Pool | PoolClient = getPool(),
 ): Promise<User | null> {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -294,7 +297,7 @@ export async function updateUserRepo(
   }
 
   values.push(userId);
-  const result = await getPool().query(
+  const result = await client.query(
     `
       UPDATE customers SET ${fields.join(", ")}
       WHERE id = $${values.length}::uuid
@@ -419,4 +422,15 @@ export async function getTodayDashboardSummaryRepo(
     totalBorrowers: Number(row?.total_borrowers ?? 0),
     borrowersPending: Number(row?.borrowers_pending ?? 0),
   };
+}
+
+export async function findCustomerForUpdateRepo(
+  client: PoolClient,
+  id: string,
+): Promise<Record<string, unknown> | null> {
+  const r = await client.query(
+    `SELECT * FROM customers WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  return r.rows[0] ?? null;
 }

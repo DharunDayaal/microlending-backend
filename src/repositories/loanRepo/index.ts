@@ -1,4 +1,4 @@
-import { PoolClient } from "pg";
+import { Pool, PoolClient } from "pg";
 import { getPool } from "../../config/database";
 import {
   CreateLoanPayload,
@@ -18,33 +18,29 @@ import {
 
 export async function createLoanRepo(
   payload: CreateLoanPayload,
+  client: Pool | PoolClient = getPool(),
 ): Promise<Loan> {
-  const client = await getPool().connect();
-  try {
-    const result = await client.query(
-      `
+  const result = await client.query(
+    `
         INSERT INTO loans (customer_id, issued_by_admin_id, owning_admin_id, nominal_amount, upfront_fee, disbursed_amount, total_payable_amount, weekly_payable_amount, total_months, total_weeks, issued_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *
       `,
-      [
-        payload.customer_id,
-        payload.issued_by_admin_id,
-        payload.owning_admin_id,
-        payload.nominal_amount,
-        payload.upfront_fee,
-        payload.disbursed_amount,
-        payload.total_payable_amount,
-        payload.weekly_payable_amount,
-        payload.total_months,
-        payload.total_weeks,
-        payload.issued_at,
-      ],
-    );
-    return result.rows[0];
-  } finally {
-    client.release();
-  }
+    [
+      payload.customer_id,
+      payload.issued_by_admin_id,
+      payload.owning_admin_id,
+      payload.nominal_amount,
+      payload.upfront_fee,
+      payload.disbursed_amount,
+      payload.total_payable_amount,
+      payload.weekly_payable_amount,
+      payload.total_months,
+      payload.total_weeks,
+      payload.issued_at,
+    ],
+  );
+  return result.rows[0];
 }
 
 // Runs on single transaction

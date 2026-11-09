@@ -1,21 +1,17 @@
-import {
-  AppError,
-  hashPassword,
-} from "../../helpers";
-import {
-  PG_UNIQUE_VIOLATION_ERROR_CODE,
-} from "../../constants";
+import { AppError, hashPassword } from "../../helpers";
+import { PG_UNIQUE_VIOLATION_ERROR_CODE } from "../../constants";
 import { withTransaction } from "../../config/database";
 import * as Repo from "../../repositories/employeeRepo";
-import {
-  insertAuditRepo,
-  revokeSessionsRepo,
-} from "../../repositories/profileRepo";
+import { revokeSessionsRepo } from "../../repositories/profileRepo";
 import type { EmployeeDetail } from "../../types/employeeTypes";
 import type { ListEmployeesQuerySchema } from "../../schemas/employeeSchema";
 import type { CreateEmployeeSchema } from "../../schemas/employeeSchema";
 import { calculateTotalWeeks } from "../../utils";
 import type { AdminUserPublic, RequestingUser } from "../../types/authTypes";
+import { AUDIT } from "../../constants/auditActions";
+import { recordAudit } from "../../services/auditService";
+
+type AuditMeta = Record<string, unknown>;
 
 /**
  * ADMIN       -> only employees whose admin_id is the caller
@@ -57,6 +53,7 @@ export async function listEmployees(
 export async function createEmployee(
   payload: CreateEmployeeSchema,
   creator: RequestingUser,
+  meta?: Record<string, unknown>,
 ): Promise<AdminUserPublic> {
   if (creator.role !== "ADMIN") {
     throw new AppError(403, "Only admins can create employees");
@@ -65,16 +62,44 @@ export async function createEmployee(
   const passwordHash = await hashPassword(payload.password);
 
   try {
-    const employee = await Repo.createEmployeeRepo({
-      user_name: payload.user_name,
-      phone_number: payload.phone_number,
-      email: payload.email,
-      password_hash: passwordHash,
-      admin_id: creator.id,
-      default_upfront_fee_percentage: payload.default_upfront_fee_percentage,
-      default_interest_percentage: payload.default_interest_percentage,
-      default_total_months: payload.default_total_months,
-      default_total_weeks: calculateTotalWeeks(payload.default_total_months),
+    const employee = await withTransaction(async (client) => {
+      const created = await Repo.createEmployeeRepo(
+        {
+          user_name: payload.user_name,
+          phone_number: payload.phone_number,
+          email: payload.email,
+          password_hash: passwordHash,
+          admin_id: creator.id,
+          default_upfront_fee_percentage:
+            payload.default_upfront_fee_percentage,
+          default_interest_percentage: payload.default_interest_percentage,
+          default_total_months: payload.default_total_months,
+          default_total_weeks: calculateTotalWeeks(
+            payload.default_total_months,
+          ),
+        },
+        client,
+      );
+
+      await recordAudit(client, {
+        action: AUDIT.EMPLOYEE_CREATED,
+        actor_id: creator.id,
+        target_id: created.id,
+        owning_admin_id: creator.id,
+        new_value: {
+          user_name: created.user_name,
+          phone_number: created.phone_number,
+          email: created.email,
+          is_verified: created.is_verified,
+          is_active: created.is_active,
+          default_upfront_fee_percentage:
+            payload.default_upfront_fee_percentage,
+          default_interest_percentage: payload.default_interest_percentage,
+          default_total_months: payload.default_total_months,
+        },
+        meta,
+      });
+      return created;
     });
     const { password_hash: _passwordHash, ...publicEmployee } = employee;
     return publicEmployee;
@@ -101,29 +126,33 @@ async function setFlag(
   id: string,
   flag: "is_verified" | "is_active",
   value: boolean,
+  meta?: Record<string, unknown>,
 ): Promise<EmployeeDetail> {
   const before = await loadManaged(user, id);
-  const beforeValue = flag === "is_verified" ? before.is_verified : before.is_active;
 
-  if (beforeValue !== value) {
-    await withTransaction(async (client) => {
-      await Repo.setEmployeeFlagRepo(client, id, flag, value);
-      // a deactivated employee must not keep refreshing a session
-      if (flag === "is_active" && !value) {
-        await revokeSessionsRepo(client, id, null);
-      }
-      await insertAuditRepo(client, {
-        actor_id: user.id,
-        target_id: id,
-        action:
-          flag === "is_verified"
-            ? "EMPLOYEE_VERIFICATION_CHANGED"
-            : "EMPLOYEE_ACTIVE_CHANGED",
-        old_value: { [flag]: beforeValue },
-        new_value: { [flag]: value },
-      });
+  await withTransaction(async (client) => {
+    const changed = await Repo.setEmployeeFlagRepo(client, id, flag, value);
+    if (!changed) return; // already had that value: no write, no log
+
+    // a deactivated employee must not keep refreshing a session
+    const revoked = flag === "is_active" && !value;
+    if (revoked) {
+      await revokeSessionsRepo(client, id, null);
+    }
+
+    await recordAudit(client, {
+      action:
+        flag === "is_verified"
+          ? AUDIT.EMPLOYEE_VERIFICATION_CHANGED
+          : AUDIT.EMPLOYEE_ACTIVE_CHANGED,
+      actor_id: user.id,
+      target_id: id,
+      owning_admin_id: before.admin_id,
+      old_value: { [flag]: !value },
+      new_value: { [flag]: value },
+      meta: { ...meta, ...(revoked ? { sessions_revoked: true } : {}) },
     });
-  }
+  });
   return getEmployee(user, id);
 }
 
@@ -131,10 +160,12 @@ export const setEmployeeVerification = (
   user: RequestingUser,
   id: string,
   isVerified: boolean,
-) => setFlag(user, id, "is_verified", isVerified);
+  meta?: Record<string, unknown>,
+) => setFlag(user, id, "is_verified", isVerified, meta);
 
 export const setEmployeeActive = (
   user: RequestingUser,
   id: string,
   isActive: boolean,
-) => setFlag(user, id, "is_active", isActive);
+  meta?: Record<string, unknown>,
+) => setFlag(user, id, "is_active", isActive, meta);

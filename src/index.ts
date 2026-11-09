@@ -20,6 +20,7 @@ import analyticsRouter from "./routes/analyticsRoute";
 import { adminsRouter, meRouter, settingsRouter } from "./routes/profileRoute";
 import employeeRouter from "./routes/employeeRoute";
 import analyticsAdvancedRouter from "./routes/analyticsAdvancedRoute";
+import auditRouter from "./routes/auditRoute";
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use("/api/admins", rbacAuth, adminsRouter);
 app.use("/api/settings", rbacAuth, settingsRouter);
 app.use("/api/employees", rbacAuth, employeeRouter);
 app.use("/api/analytics", rbacAuth, analyticsAdvancedRouter);
+app.use("/api/audit-logs", rbacAuth, auditRouter);
 
 app.use((_req, _res, next) => {
   next(new AppError(404, "Route not found"));

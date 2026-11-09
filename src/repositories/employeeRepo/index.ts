@@ -28,8 +28,9 @@ const SELECT_EMPLOYEE = `
 
 export async function createEmployeeRepo(
   payload: CreateEmployeePayload,
+  db: Pool | PoolClient = getPool(),
 ) {
-  const response = await getPool().query(
+  const response = await db.query(
     `
       INSERT INTO users (
         user_name, phone_number, email, password_hash, role, admin_id,
@@ -137,19 +138,18 @@ export async function getEmployeeDetailRepo(
 }
 
 export async function setEmployeeFlagRepo(
-  client: Client,
+  db: Client,
   id: string,
   flag: "is_verified" | "is_active",
   value: boolean,
-): Promise<void> {
+): Promise<boolean> {
   if (flag !== "is_verified" && flag !== "is_active") {
     throw new Error("Invalid flag");
   }
-  await client.query(
-    `
-      UPDATE users SET ${flag} = $1, updated_at = now()
-      WHERE id = $2 AND role = 'USER'
-    `,
+  const r = await db.query(
+    `UPDATE users SET ${flag} = $1, updated_at = now()
+      WHERE id = $2 AND role = 'USER' AND ${flag} IS DISTINCT FROM $1`,
     [value, id],
   );
+  return (r.rowCount ?? 0) > 0;
 }

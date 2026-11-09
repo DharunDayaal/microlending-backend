@@ -25,6 +25,10 @@ import type {
   UpdateProfileSchema,
 } from "../../schemas/profileSchema";
 import { calculateTotalWeeks } from "../../utils";
+import { recordAudit, changedValues } from "../auditService";
+import { AUDIT } from "../../constants/auditActions";
+
+type AuditMeta = Record<string, unknown>;
 
 const isUniqueViolation = (e: unknown) =>
   (e as { code?: string }).code === PG_UNIQUE_VIOLATION_ERROR_CODE;
@@ -77,6 +81,7 @@ export async function getProfile(user: RequestingUser) {
 export async function updateProfile(
   user: RequestingUser,
   payload: UpdateProfileSchema,
+  meta?: AuditMeta,
 ) {
   const before = await Repo.findUserRepo(user.id);
   if (!before) throw new AppError(404, "Account not found");
@@ -92,16 +97,21 @@ export async function updateProfile(
   try {
     const updated = await withTransaction(async (client) => {
       const row = await Repo.updateProfileRepo(client, user.id, changes);
-      await Repo.insertAuditRepo(client, {
-        actor_id: user.id,
-        target_id: user.id,
-        action: "PROFILE_UPDATED",
-        old_value: {
-          user_name: before.user_name,
-          email: before.email,
-        },
-        new_value: { user_name: row.user_name, email: row.email },
-      });
+      const diff = changedValues(
+        before as unknown as Record<string, unknown>, /// revert this when fails
+        row as unknown as Record<string, unknown>,
+        ["user_name", "email"],
+      );
+      if (diff) {
+        await recordAudit(client, {
+          action: AUDIT.PROFILE_UPDATED,
+          actor_id: user.id,
+          target_id: user.id,
+          ...diff,
+          meta,
+        });
+      }
+      return row;
       return row;
     });
     return buildProfile(updated);
@@ -118,6 +128,7 @@ export async function updateProfile(
 export async function changePhone(
   user: RequestingUser,
   payload: ChangePhoneSchema,
+  meta?: AuditMeta,
 ) {
   const before = await Repo.findUserRepo(user.id);
   if (!before) throw new AppError(404, "Account not found");
@@ -149,12 +160,13 @@ export async function changePhone(
         payload.phone_number,
       );
       await OtpRepository.markOtpConsumedRepo(client, otp.id);
-      await Repo.insertAuditRepo(client, {
+      await recordAudit(client, {
+        action: AUDIT.PHONE_CHANGED,
         actor_id: user.id,
         target_id: user.id,
-        action: "PHONE_CHANGED",
         old_value: { phone_number: before.phone_number },
         new_value: { phone_number: row.phone_number },
+        meta,
       });
       return row;
     });
@@ -171,6 +183,7 @@ export async function changePhone(
 export async function changePassword(
   user: RequestingUser,
   payload: ChangePasswordSchema,
+  meta?: AuditMeta,
 ): Promise<{ other_sessions_signed_out: number }> {
   const newHash = await hashPassword(payload.new_password);
   const keepHash = payload.refresh_token
@@ -186,10 +199,11 @@ export async function changePassword(
 
     await Repo.updatePasswordHashRepo(client, user.id, newHash);
     const revoked = await Repo.revokeSessionsRepo(client, user.id, keepHash);
-    await Repo.insertAuditRepo(client, {
+    await recordAudit(client, {
+      action: AUDIT.PASSWORD_CHANGED,
       actor_id: user.id,
       target_id: user.id,
-      action: "PASSWORD_CHANGED",
+      meta: { ...meta, other_sessions_signed_out: revoked },
     });
     return { other_sessions_signed_out: revoked };
   });
@@ -199,19 +213,45 @@ export async function listSessions(user: RequestingUser) {
   return Repo.listSessionsRepo(user.id);
 }
 
-export async function revokeSession(user: RequestingUser, sessionId: string) {
-  const n = await Repo.revokeSessionRepo(user.id, sessionId);
-  if (n === 0) throw new AppError(404, "Session not found");
+export async function revokeSession(
+  user: RequestingUser,
+  sessionId: string,
+  meta?: Record<string, unknown>,
+) {
+  await withTransaction(async (client) => {
+    const n = await Repo.revokeSessionRepo(client, user.id, sessionId);
+    if (n === 0) throw new AppError(404, "Session not found");
+    await recordAudit(client, {
+      action: AUDIT.SESSIONS_REVOKED,
+      actor_id: user.id,
+      target_id: user.id,
+      meta: { ...meta, session_id: sessionId, scope: "one" },
+    });
+  });
 }
 
-export async function revokeAllSessions(user: RequestingUser) {
-  const n = await Repo.revokeSessionsRepo(getPool(), user.id, null);
-  return { signed_out: n };
+export async function revokeAllSessions(
+  user: RequestingUser,
+  meta?: Record<string, unknown>,
+) {
+  return withTransaction(async (client) => {
+    const n = await Repo.revokeSessionsRepo(client, user.id, null);
+    if (n > 0) {
+      await recordAudit(client, {
+        action: AUDIT.SESSIONS_REVOKED,
+        actor_id: user.id,
+        target_id: user.id,
+        meta: { ...meta, scope: "all", signed_out: n },
+      });
+    }
+    return { signed_out: n };
+  });
 }
 
 export async function updateDefaults(
   user: RequestingUser,
   payload: UpdateDefaultsSchema,
+  meta?: AuditMeta,
 ) {
   if (user.role === "USER") {
     throw new AppError(403, "Loan defaults are set by your admin");
@@ -254,18 +294,25 @@ export async function updateDefaults(
       months,
       weeks,
     });
-    await Repo.insertAuditRepo(client, {
-      actor_id: user.id,
-      target_id: user.id,
-      action: "LOAN_DEFAULTS_UPDATED",
-      old_value: {
-        fee: before.default_upfront_fee_percentage,
-        interest: before.default_interest_percentage,
-        months: before.default_total_months,
-        weeks: before.default_total_weeks,
-      },
-      new_value: { fee, interest, months, weeks },
-    });
+    const diff = changedValues(
+      before as unknown as Record<string, unknown>,
+      row as unknown as Record<string, unknown>,
+      [
+        "default_upfront_fee_percentage",
+        "default_interest_percentage",
+        "default_total_months",
+        "default_total_weeks",
+      ],
+    );
+    if (diff) {
+      await recordAudit(client, {
+        action: AUDIT.LOAN_DEFAULTS_UPDATED,
+        actor_id: user.id,
+        target_id: user.id,
+        ...diff,
+        meta,
+      });
+    }
     return row;
   });
   return buildProfile(updated);
@@ -278,6 +325,7 @@ export async function getLimits() {
 export async function updateLimits(
   user: RequestingUser,
   payload: UpdateLimitsSchema,
+  meta?: AuditMeta,
 ) {
   if (user.role !== "SUPER_ADMIN") {
     throw new AppError(403, "Only the super admin can change global limits");
@@ -297,17 +345,43 @@ export async function updateLimits(
     throw new AppError(400, "Minimum term cannot exceed maximum term");
   }
 
-  await withTransaction(async (client) => {
+  return withTransaction(async (client) => {
+    // one writer at a time; the read below then sees the latest committed limits
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('loan_limits'))");
+
+    const before = await Repo.getLimitsRepo();
+    const next: Repo.Limits = { ...before };
+    for (const [k, v] of Object.entries(payload)) {
+      if (v !== undefined) (next as unknown as Record<string, number>)[k] = v;
+    }
+    if (next.min_principal > next.max_principal) {
+      throw new AppError(
+        400,
+        "Minimum principal cannot exceed maximum principal",
+      );
+    }
+    if (next.min_months > next.max_months) {
+      throw new AppError(400, "Minimum term cannot exceed maximum term");
+    }
+
+    const diff = changedValues(
+      before as unknown as Record<string, unknown>,
+      next as unknown as Record<string, unknown>,
+      Object.keys(next),
+    );
+    if (!diff) return before; // nothing changed
+
     await Repo.upsertLimitsRepo(client, next, user.id);
-    await Repo.insertAuditRepo(client, {
+    await recordAudit(client, {
+      action: AUDIT.LOAN_LIMITS_UPDATED,
       actor_id: user.id,
       target_id: null,
-      action: "LOAN_LIMITS_UPDATED",
-      old_value: before,
-      new_value: next,
+      ...diff,
+      meta,
     });
+
+    return next;
   });
-  return next;
 }
 
 const todayIst = () =>
@@ -448,6 +522,7 @@ async function setAdminFlag(
   adminId: string,
   flag: "is_verified" | "is_active",
   value: boolean,
+  meta?: AuditMeta,
 ) {
   requireSuperAdmin(user);
   const before = await Repo.findUserRepo(adminId);
@@ -457,20 +532,30 @@ async function setAdminFlag(
   if (before[flag] === value) return before;
 
   return withTransaction(async (client) => {
-    const row = await Repo.setAdminFlagRepo(client, adminId, flag, value);
-    // a deactivated admin must not keep refreshing a session
-    if (flag === "is_active" && !value) {
-      await Repo.revokeSessionsRepo(client, adminId, null);
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      `admin-flag:${adminId}`,
+    ]);
+    const before = await Repo.findUserRepo(adminId); // read after the lock
+    if (!before || before.role !== "ADMIN") {
+      throw new AppError(404, "Admin not found");
     }
-    await Repo.insertAuditRepo(client, {
-      actor_id: user.id,
-      target_id: adminId,
+    if (before[flag] === value) return before;
+
+    const row = await Repo.setAdminFlagRepo(client, adminId, flag, value);
+    let signedOut = 0;
+    if (flag === "is_active" && !value) {
+      signedOut = await Repo.revokeSessionsRepo(client, adminId, null);
+    }
+    await recordAudit(client, {
       action:
         flag === "is_verified"
-          ? "ADMIN_VERIFICATION_CHANGED"
-          : "ADMIN_ACTIVE_CHANGED",
+          ? AUDIT.ADMIN_VERIFICATION_CHANGED
+          : AUDIT.ADMIN_ACTIVE_CHANGED,
+      actor_id: user.id,
+      target_id: adminId,
       old_value: { [flag]: before[flag] },
       new_value: { [flag]: value },
+      meta: { ...meta, ...(signedOut ? { sessions_revoked: signedOut } : {}) },
     });
     return row;
   });
@@ -480,10 +565,12 @@ export const setAdminVerification = (
   user: RequestingUser,
   adminId: string,
   isVerified: boolean,
-) => setAdminFlag(user, adminId, "is_verified", isVerified);
+  meta?: AuditMeta,
+) => setAdminFlag(user, adminId, "is_verified", isVerified, meta);
 
 export const setAdminActive = (
   user: RequestingUser,
   adminId: string,
   isActive: boolean,
-) => setAdminFlag(user, adminId, "is_active", isActive);
+  meta?: AuditMeta,
+) => setAdminFlag(user, adminId, "is_active", isActive, meta);

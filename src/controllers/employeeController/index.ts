@@ -9,6 +9,7 @@ import {
   employeeVerificationSchema,
 } from "../../schemas/employeeSchema";
 import type { ListEmployeesQuerySchema } from "../../schemas/employeeSchema";
+import { auditContext } from "../../services/auditService";
 
 type Handler = (req: Request, res: Response) => Promise<void>;
 
@@ -47,7 +48,11 @@ export const listEmployees = wrap(async (req, res) => {
 
 export const createEmployee = wrap(async (req, res) => {
   const payload = createEmployeeSchema.parse(req.body);
-  const employee = await Service.createEmployee(payload, req.user!);
+  const employee = await Service.createEmployee(
+    payload,
+    req.user!,
+    auditContext(req),
+  );
   successResponse(201, res, { employee }, "Employee created successfully");
 });
 
@@ -62,6 +67,7 @@ export const setEmployeeVerification = wrap(async (req, res) => {
     req.user!,
     employeeId(req),
     is_verified,
+    auditContext(req),
   );
   successResponse(200, res, { employee }, "Employee verification updated");
 });
@@ -72,6 +78,7 @@ export const setEmployeeActive = wrap(async (req, res) => {
     req.user!,
     employeeId(req),
     is_active,
+    auditContext(req),
   );
   successResponse(200, res, { employee }, "Employee status updated");
 });

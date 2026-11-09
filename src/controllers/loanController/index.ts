@@ -14,6 +14,8 @@ import {
 import { CreateLoanPayload } from "../../types/loanTypes";
 import * as LoanService from "../../services/loanService";
 import * as AuthRepository from "../../repositories/authRepo";
+import { auditContext } from "../../services/auditService";
+import { getLimitsRepo } from "../../repositories/profileRepo";
 
 const percentOf = (amount: number, percent: number) =>
   Math.round((amount * percent) / 100);
@@ -37,6 +39,11 @@ export async function createLoan(
     } = req.body as CreateLoanSchema;
 
     const adminId = req.user!.id;
+
+    const owningAdminId = await LoanService.assertCanIssueLoan(
+      customer_id,
+      req.user!,
+    );
 
     const isActive = await LoanService.isCustomerLoanActive(customer_id);
     if (isActive) {
@@ -68,6 +75,14 @@ export async function createLoan(
     const interestPercent =
       interest_percentage ?? defaultsSource.default_interest_percentage!;
     const months = total_months ?? defaultsSource.default_total_months!;
+
+    await LoanService.assertWithinLoanLimits({
+      nominal_amount,
+      fee_percent: feePercent,
+      interest_percent: interestPercent,
+      months,
+    });
+
     const totalWeeks = calculateTotalWeeks(months);
 
     const upfrontFee = percentOf(nominal_amount, feePercent);
@@ -79,7 +94,7 @@ export async function createLoan(
     const payload: CreateLoanPayload = {
       customer_id,
       issued_by_admin_id: adminId,
-      owning_admin_id: req.user!.teamId,
+      owning_admin_id: owningAdminId,
       nominal_amount,
       upfront_fee: upfrontFee,
       disbursed_amount: disbursedAmount,
@@ -90,7 +105,7 @@ export async function createLoan(
       issued_at: issued_at ?? new Date(),
     };
 
-    const loan = await LoanService.createLoan(payload);
+    const loan = await LoanService.createLoan(payload, auditContext(req));
     successResponse(201, res, { loan }, "Loan created successfully");
   } catch (error) {
     if (
@@ -118,6 +133,7 @@ export async function collectPayment(
       week_number,
       amount_paid,
       req.user!,
+      auditContext(req),
     );
 
     successResponse(201, res, response, "Payment collected successfully");
@@ -177,6 +193,7 @@ export async function updateLoanStatus(
       req.params.loanId,
       status,
       user,
+      auditContext(req),
     );
     successResponse(200, res, { loan }, "Loan status updated successfully");
   } catch (error) {
@@ -190,8 +207,8 @@ export async function collectionsDue(
   next: NextFunction,
 ) {
   try {
-    const { preferred_payment_day, page, limit } =
-      res.locals.query as CollectionsDueQuerySchema;
+    const { preferred_payment_day, page, limit } = res.locals
+      .query as CollectionsDueQuerySchema;
     const { rows, total, summary } = await LoanService.listCollectionsDue(
       req.user!,
       preferred_payment_day,

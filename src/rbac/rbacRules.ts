@@ -251,6 +251,12 @@ const analyticsAdvancedRbacRules = [
   { method: "GET", path: "/api/analytics/admin/cohorts", roles: [...ADMINS] },
 ];
 
+export const auditRbacRules = [
+  { method: "GET", path: "/api/audit-logs", roles: [...ADMINS] },
+  { method: "GET", path: "/api/audit-logs/actions", roles: [...ADMINS] },
+  { method: "GET", path: "/api/audit-logs/:id", roles: [...ADMINS] },
+];
+
 function matchPath(pattern: string, actual: string): boolean {
   if (pattern === actual) return true;
 
@@ -281,6 +287,7 @@ export function getAllowedRoles(
     ...profileRbacRules,
     ...employeeRbacRules,
     ...analyticsAdvancedRbacRules,
+    ...auditRbacRules,
   ].find((rule) => rule.method === method && matchPath(rule.path, path));
 
   return rule?.roles ?? null;
