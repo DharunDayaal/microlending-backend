@@ -251,10 +251,16 @@ const analyticsAdvancedRbacRules = [
   { method: "GET", path: "/api/analytics/admin/cohorts", roles: [...ADMINS] },
 ];
 
-export const auditRbacRules = [
+const auditRbacRules = [
   { method: "GET", path: "/api/audit-logs", roles: [...ADMINS] },
   { method: "GET", path: "/api/audit-logs/actions", roles: [...ADMINS] },
   { method: "GET", path: "/api/audit-logs/:id", roles: [...ADMINS] },
+];
+
+const exportRbacRules = [
+  { method: "POST", path: "/api/exports", roles: [...ALL] },
+  { method: "GET", path: "/api/exports", roles: [...ALL] },
+  { method: "GET", path: "/api/exports/:id", roles: [...ALL] },
 ];
 
 function matchPath(pattern: string, actual: string): boolean {
@@ -288,6 +294,7 @@ export function getAllowedRoles(
     ...employeeRbacRules,
     ...analyticsAdvancedRbacRules,
     ...auditRbacRules,
+    ...exportRbacRules,
   ].find((rule) => rule.method === method && matchPath(rule.path, path));
 
   return rule?.roles ?? null;
