@@ -67,7 +67,7 @@ app.get("/health/ready", async (_req, res) => {
 });
 
 app.set("trust proxy", 1);
-if (SET_RATE_LIMIT) {
+if (SET_RATE_LIMIT === "true") {
   app.use(apiRateLimitConfig);
 }
 
