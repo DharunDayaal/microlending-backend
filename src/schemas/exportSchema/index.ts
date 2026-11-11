@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const uuid = z.string().uuid();
+const uuid = z.uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
 
 const format = z.enum(["xlsx", "csv"]).default("xlsx");
@@ -45,5 +45,5 @@ export const createExportSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-export const exportIdParamSchema = z.string().uuid();
+export const exportIdParamSchema = z.uuid();
 export type CreateExportSchema = z.infer<typeof createExportSchema>;
