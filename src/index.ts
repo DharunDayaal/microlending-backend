@@ -1,6 +1,6 @@
 import express from "express";
 import helmet from "helmet";
-import { PORT } from "./config/env";
+import { PORT, SET_RATE_LIMIT } from "./config/env";
 import cors from "cors";
 import {
   AppError,
@@ -67,7 +67,9 @@ app.get("/health/ready", async (_req, res) => {
 });
 
 app.set("trust proxy", 1);
-app.use(apiRateLimitConfig);
+if (SET_RATE_LIMIT) {
+  app.use(apiRateLimitConfig);
+}
 
 app.use("/api/auth", authRouter);
 app.use("/api/users", rbacAuth, userRouter);
