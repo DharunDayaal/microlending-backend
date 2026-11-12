@@ -16,6 +16,7 @@ export interface RowSink {
 export const CONTENT_TYPE: Record<ExportFormat, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   csv: "text/csv; charset=utf-8",
+  pdf: "application/pdf",
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -36,7 +37,7 @@ function cellValue(col: ExportColumn, v: unknown): unknown {
   if (col.kind === "date" && typeof v === "string" && ISO_DATE.test(v)) {
     return new Date(`${v}T00:00:00Z`); // UTC midnight = the same calendar day in Excel
   }
-  if (col.kind === "int") return Number(v);
+  if (col.kind === "int" || col.kind === "pct") return Number(v);
   return String(v); // always a string cell, so text can never run as a formula
 }
 
@@ -56,9 +57,11 @@ function xlsxSink(filePath: string, columns: ExportColumn[]): RowSink {
     style:
       c.kind === "int"
         ? { numFmt: "#,##0" }
-        : c.kind === "date"
-          ? { numFmt: "dd mmm yyyy" }
-          : {},
+        : c.kind === "pct"
+          ? { numFmt: '0.0"%"' }
+          : c.kind === "date"
+            ? { numFmt: "dd mmm yyyy" }
+            : {},
   }));
   ws.autoFilter = {
     from: { row: 1, column: 1 },
@@ -102,7 +105,10 @@ function csvSafe(s: string): string {
 
 function csvCell(col: ExportColumn, v: unknown): string {
   if (v === null || v === undefined) return "";
-  const raw = col.kind === "int" ? String(Number(v)) : csvSafe(String(v));
+  const raw =
+    col.kind === "int" || col.kind === "pct"
+      ? String(Number(v))
+      : csvSafe(String(v));
   return /[",\r\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
 }
 
@@ -117,7 +123,9 @@ function csvSink(filePath: string, columns: ExportColumn[]): RowSink {
   const start = async () => {
     if (started) return;
     started = true;
-    const head = columns.map((c) => csvCell({ ...c, kind: "text" }, c.header)).join(",");
+    const head = columns
+      .map((c) => csvCell({ ...c, kind: "text" }, c.header))
+      .join(",");
     await write(`﻿${head}\r\n`);
   };
 
@@ -146,13 +154,41 @@ function csvSink(filePath: string, columns: ExportColumn[]): RowSink {
   };
 }
 
+// ---------------------------------------------------------------------------
+// PDF: rows are kept in memory (the row cap for PDF is small) and drawn at the end
+// ---------------------------------------------------------------------------
+export type PdfRenderer = (rows: Record<string, unknown>[]) => Promise<Buffer>;
+
+function pdfSink(filePath: string, render: PdfRenderer | undefined): RowSink {
+  const all: Record<string, unknown>[] = [];
+  return {
+    async addBatch(rows) {
+      all.push(...rows);
+    },
+    async finish() {
+      if (!render) throw new Error("This report cannot be made as a PDF");
+      await fs.promises.writeFile(filePath, await render(all));
+      const { size } = await fs.promises.stat(filePath);
+      return { filePath, size };
+    },
+    async abort() {
+      all.length = 0;
+      await removeQuietly(filePath);
+    },
+  };
+}
+
 export function createSink(
   format: ExportFormat,
   columns: ExportColumn[],
   jobId: string,
+  renderPdf?: PdfRenderer,
 ): RowSink {
   const filePath = tmpFilePath(jobId, format);
-  return format === "xlsx" ? xlsxSink(filePath, columns) : csvSink(filePath, columns);
+  if (format === "pdf") return pdfSink(filePath, renderPdf);
+  return format === "xlsx"
+    ? xlsxSink(filePath, columns)
+    : csvSink(filePath, columns);
 }
 
 export { removeQuietly };

@@ -1,4 +1,3 @@
-// place at: src/services/exportWorker.ts
 // Runs ONE export per call. Called by the protected /api/internal/exports/run
 // route, which pg_cron triggers while jobs are waiting.
 import fs from "node:fs";
@@ -9,10 +8,19 @@ import * as Repo from "../../repositories/exportRepo";
 import { EXPORTS } from "../../repositories/exportRepo/exportQueries";
 import { recordAudit } from "../../services/auditService";
 import { maxRowsFor } from "../../services/exportService";
-import { removeExportFiles, uploadExportFile } from "./exportStorage";
+import {
+  removeExportFiles,
+  uploadExportFile,
+} from "../../services/exportService/exportStorage";
 import { EXPORT_BATCH_SIZE } from "../../types/exportTypes";
+import { renderTablePdf } from "../../utils/exportPdf";
 import type { ExportCursor } from "../../types/exportTypes";
-import { CONTENT_TYPE, createSink, removeQuietly, tmpFilePath } from "../../utils/exportFile";
+import {
+  CONTENT_TYPE,
+  createSink,
+  removeQuietly,
+  tmpFilePath,
+} from "../../utils/exportFile";
 
 /** Retrying will not help (bad type, too many rows): fail now and show this message. */
 class PermanentError extends Error {}
@@ -23,6 +31,18 @@ export type RunResult =
   | { ran: false }
   | { ran: true; id: string; status: string; rows?: number; ms?: number };
 
+/** "from: 2026-11-01 | to: 2026-11-09" for the PDF heading (ids are left out) */
+function filterSummary(filters: Record<string, string | undefined>): string {
+  const first = ["from", "to"];
+  const rank = (k: string) =>
+    first.includes(k) ? first.indexOf(k) : first.length;
+  return Object.entries(filters)
+    .filter(([k, v]) => v && !k.endsWith("_id"))
+    .sort(([a], [b]) => rank(a) - rank(b))
+    .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)
+    .join("  |  ");
+}
+
 export async function runNextExport(): Promise<RunResult> {
   const job = await Repo.claimNextExportRepo();
   if (!job) return { ran: false };
@@ -30,11 +50,29 @@ export async function runNextExport(): Promise<RunResult> {
   const started = Date.now();
   const def = EXPORTS[job.type];
   const tmp = tmpFilePath(job.id, job.format);
-  const sink = def ? createSink(job.format, def.columns, job.id) : null;
+  const filters = job.params?.filters ?? {};
+  const sink = def
+    ? createSink(
+        job.format,
+        def.columns,
+        job.id,
+        // a type may draw its own PDF; otherwise the PDF is a table of its columns
+        def.renderPdf
+          ? (rows) => def.renderPdf!(rows, filters)
+          : (rows) =>
+              renderTablePdf({
+                title: def.title,
+                subtitle: filterSummary(filters),
+                columns: def.columns,
+                rows,
+                generatedAt: new Date(),
+              }),
+      )
+    : null;
 
   try {
-    if (!def || !sink) throw new PermanentError("This report type is no longer available.");
-    const filters = job.params?.filters ?? {};
+    if (!def || !sink)
+      throw new PermanentError("This report type is no longer available.");
 
     const total = await def.count(job.scope, filters);
     const cap = maxRowsFor(job.format);
@@ -48,11 +86,17 @@ export async function runNextExport(): Promise<RunResult> {
     let cursor: ExportCursor = null;
     let processed = 0;
     do {
-      const batch = await def.fetch(job.scope, filters, cursor, EXPORT_BATCH_SIZE);
+      const batch = await def.fetch(
+        job.scope,
+        filters,
+        cursor,
+        EXPORT_BATCH_SIZE,
+      );
       await sink.addBatch(batch.rows);
       processed += batch.rows.length;
       cursor = batch.next;
-      if (!(await Repo.heartbeatExportRepo(job.id, processed))) throw new LostJobError();
+      if (!(await Repo.heartbeatExportRepo(job.id, processed)))
+        throw new LostJobError();
     } while (cursor);
 
     const { filePath, size } = await sink.finish();
@@ -90,7 +134,9 @@ export async function runNextExport(): Promise<RunResult> {
     });
 
     const ms = Date.now() - started;
-    logger.info(`Export ${job.id} (${job.type}/${job.format}) done: ${processed} rows, ${size} bytes, ${ms} ms`);
+    logger.info(
+      `Export ${job.id} (${job.type}/${job.format}) done: ${processed} rows, ${size} bytes, ${ms} ms`,
+    );
     return { ran: true, id: job.id, status: "DONE", rows: processed, ms };
   } catch (err) {
     await sink?.abort().catch(() => undefined);
@@ -104,7 +150,9 @@ export async function runNextExport(): Promise<RunResult> {
     logger.error(err, `Export ${job.id} failed (attempt ${job.attempts}):`);
     const status = await Repo.failOrRequeueExportRepo(
       job.id,
-      permanent ? (err as Error).message : "The export failed. Please try again.",
+      permanent
+        ? (err as Error).message
+        : "The export failed. Please try again.",
       permanent,
     );
     return { ran: true, id: job.id, status: status ?? "UNKNOWN" };
@@ -114,7 +162,10 @@ export async function runNextExport(): Promise<RunResult> {
 }
 
 /** Nightly: delete expired files through the Storage API, then old finished rows. */
-export async function cleanupExports(): Promise<{ removed: number; purged: number }> {
+export async function cleanupExports(): Promise<{
+  removed: number;
+  purged: number;
+}> {
   let removed = 0;
   for (;;) {
     const batch = await Repo.findExpiredExportsRepo(200);
