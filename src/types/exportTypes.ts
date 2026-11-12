@@ -1,7 +1,19 @@
-export const EXPORT_TYPES = ["collections", "overdue"] as const;
+export const EXPORT_TYPES = [
+  "collections",
+  "overdue",
+  "weekday_sheet",
+  "due_this_week",
+  "customer_list",
+  "loans_register",
+  "closed_loans",
+  "new_customers",
+  "audit_log",
+  "employee_performance",
+  "team_summary",
+] as const;
 export type ExportType = (typeof EXPORT_TYPES)[number];
 
-export const EXPORT_FORMATS = ["xlsx", "csv"] as const;
+export const EXPORT_FORMATS = ["xlsx", "csv", "pdf"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
 export type ExportStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "EXPIRED";
@@ -68,6 +80,8 @@ export const EXPORT_MAX_ATTEMPTS = 3;
 /** a RUNNING job with no heartbeat for this long is treated as dead. Keep in step with 014_exports_cron.sql */
 export const EXPORT_STALE_MINUTES = 6;
 export const EXPORT_BATCH_SIZE = 5000;
+/** a PDF is built in memory, so it holds fewer rows than a spreadsheet */
+export const EXPORT_MAX_PDF_ROWS = 1000;
 export const EXPORT_MAX_ACTIVE_PER_USER = 2;
 export const EXPORT_FILE_TTL_HOURS = 24;
 export const EXPORT_URL_TTL_SECONDS = 300;
@@ -77,8 +91,8 @@ export interface ExportColumn {
   header: string;
   key: string;
   width: number;
-  /** text (default) | int | date (ISO yyyy-mm-dd string in, real Excel date out) */
-  kind?: "text" | "int" | "date";
+  /** text (default) | int | pct (0-100, one decimal) | date (ISO yyyy-mm-dd string in, real Excel date out) */
+  kind?: "text" | "int" | "pct" | "date";
 }
 
 /** Opaque position of the last row read. Values are strings so no precision is lost. */
@@ -91,6 +105,8 @@ export interface ExportBatch {
 
 export interface ExportDefinition {
   roles: ExportRole[];
+  /** heading of the PDF version */
+  title: string;
   columns: ExportColumn[];
   count(scope: ExportScope, filters: ExportFilters): Promise<number>;
   fetch(
@@ -101,4 +117,9 @@ export interface ExportDefinition {
   ): Promise<ExportBatch>;
   /** file name without extension */
   label(filters: ExportFilters): string;
+  /** optional custom PDF layout. Without it, a PDF is a plain table of the columns */
+  renderPdf?(
+    rows: Record<string, unknown>[],
+    filters: ExportFilters,
+  ): Promise<Buffer>;
 }
