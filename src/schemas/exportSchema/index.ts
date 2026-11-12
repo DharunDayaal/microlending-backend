@@ -78,7 +78,7 @@ export const createExportSchema = z.discriminatedUnion("type", [
   t("overdue", scopeOnly.default({})),
   t("weekday_sheet", scopeOnly.extend({ weekday }), "pdf"),
   // route sheet: a short window, since it is walked day by day
-  t("due_this_week", range(62)),
+  t("due_this_week", range(366)),
   t(
     "customer_list",
     scopeOnly.extend({ payment_day: weekday.optional() }).default({}),
