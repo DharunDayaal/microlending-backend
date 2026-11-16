@@ -73,22 +73,23 @@ const FONT_DIRS = [
 ];
 type FontSet = { L: string; LB: string; T: string; TB: string };
 
+function fontDir(): string | undefined {
+  return FONT_DIRS.find((d) => fs.existsSync(path.join(d, "NotoSans-Regular.woff")));
+}
+
+/**
+ * Passed as `font` when creating a document. An empty string (not undefined) tells
+ * pdfkit not to load its built-in Helvetica, whose data files Vercel does not ship.
+ * Every font used is one of ours, registered in loadFonts().
+ */
+const NO_DEFAULT_FONT = "";
+
 function loadFonts(doc: Doc): FontSet {
-  const dir = FONT_DIRS.find((d) =>
-    fs.existsSync(path.join(d, "NotoSans-Regular.woff")),
-  );
+  const dir = fontDir();
   if (!dir) {
-    logger.warn(
-      "PDF fonts not found; Tamil text will not print. Looked in: " +
-        FONT_DIRS.join(", "),
-    );
+    logger.warn("PDF fonts not found; Tamil text will not print. Looked in: " + FONT_DIRS.join(", "));
     doc.font("Helvetica"); // built-in fallback (needs pdfkit's standard-fonts files on the server)
-    return {
-      L: "Helvetica",
-      LB: "Helvetica-Bold",
-      T: "Helvetica",
-      TB: "Helvetica-Bold",
-    };
+    return { L: "Helvetica", LB: "Helvetica-Bold", T: "Helvetica", TB: "Helvetica-Bold" };
   }
   doc.registerFont("L", path.join(dir, "NotoSans-Regular.woff"));
   doc.registerFont("LB", path.join(dir, "NotoSans-Bold.woff"));
@@ -106,8 +107,7 @@ function splitRuns(s: string): { text: string; tamil: boolean }[] {
   const out: { text: string; tamil: boolean }[] = [];
   let last = 0;
   for (const m of s.matchAll(TAMIL_RUN)) {
-    if (m.index! > last)
-      out.push({ text: s.slice(last, m.index), tamil: false });
+    if (m.index! > last) out.push({ text: s.slice(last, m.index), tamil: false });
     out.push({ text: m[0], tamil: true });
     last = m.index! + m[0].length;
   }
@@ -159,67 +159,30 @@ function fit(c: Ctx, s: string, o: TextOpts): string {
 }
 
 /** draws on a baseline so Tamil and Latin runs line up; returns the width drawn */
-function put(
-  c: Ctx,
-  s: string,
-  x: number,
-  baseline: number,
-  o: TextOpts,
-): number {
+function put(c: Ctx, s: string, x: number, baseline: number, o: TextOpts): number {
   const text = fit(c, s, o);
   let cx = x;
   c.doc.fillColor(o.color ?? INK);
   for (const run of splitRuns(text)) {
     c.doc.font(fontFor(c, run.tamil, o.bold)).fontSize(o.size);
-    c.doc.text(run.text, cx, baseline, {
-      lineBreak: false,
-      baseline: "alphabetic",
-    });
+    c.doc.text(run.text, cx, baseline, { lineBreak: false, baseline: "alphabetic" });
     cx += c.doc.widthOfString(run.text);
   }
   return cx - x;
 }
 
-function putRight(
-  c: Ctx,
-  s: string,
-  right: number,
-  baseline: number,
-  o: TextOpts,
-): void {
+function putRight(c: Ctx, s: string, right: number, baseline: number, o: TextOpts): void {
   const text = fit(c, s, o);
-  put(c, text, right - measure(c, text, o), baseline, {
-    ...o,
-    maxWidth: undefined,
-  });
+  put(c, text, right - measure(c, text, o), baseline, { ...o, maxWidth: undefined });
 }
 
-function putCentered(
-  c: Ctx,
-  s: string,
-  centerX: number,
-  baseline: number,
-  o: TextOpts,
-): void {
+function putCentered(c: Ctx, s: string, centerX: number, baseline: number, o: TextOpts): void {
   const w = measure(c, s, o);
   put(c, s, centerX - w / 2, baseline, { ...o, maxWidth: undefined });
 }
 
 // ---- formatting -------------------------------------------------------------
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function fmtDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -254,65 +217,35 @@ function drawBlock(c: Ctx, l: SheetLoan, index: number, top: number): void {
   // customer
   const badge = l.status === "OVERDUE" ? RED : GREEN;
   put(c, `${index}.`, left, y + 11, { size: 9, color: MUTED });
-  put(c, l.customer_name, left + 18, y + 11, {
-    size: 12,
-    bold: true,
-    maxWidth: inner - 18 - 70,
-  });
-  doc
-    .roundedRect(right - 58, y - 1, 58, 15, 7)
-    .fillColor(badge.bg)
-    .fill();
-  putCentered(c, l.status, right - 29, y + 9.5, {
-    size: 7.5,
-    bold: true,
-    color: badge.fg,
-  });
+  put(c, l.customer_name, left + 18, y + 11, { size: 12, bold: true, maxWidth: inner - 18 - 70 });
+  doc.roundedRect(right - 58, y - 1, 58, 15, 7).fillColor(badge.bg).fill();
+  putCentered(c, l.status, right - 29, y + 9.5, { size: 7.5, bold: true, color: badge.fg });
   y += 18;
 
-  const address = [l.street_name, l.city, l.district]
-    .filter(Boolean)
-    .join(", ");
-  const contact = [
-    l.phone_number,
-    address || "-",
-    `Pays on ${cap(l.payment_day)}`,
-  ].join("  |  ");
+  const address = [l.street_name, l.city, l.district].filter(Boolean).join(", ");
+  const contact = [l.phone_number, address || "-", `Pays on ${cap(l.payment_day)}`].join("  |  ");
   put(c, contact, left, y + 8, { size: 8.5, color: MUTED, maxWidth: inner });
   y += 13;
 
   // referral: details if available, otherwise "-"
-  const labelW = put(c, "Referred by: ", left, y + 8, {
-    size: 8.5,
-    color: MUTED,
-  });
+  const labelW = put(c, "Referred by: ", left, y + 8, { size: 8.5, color: MUTED });
   const referrer = l.referrer_name
-    ? [l.referrer_name, l.referrer_phone, l.referrer_city]
-        .filter(Boolean)
-        .join("  |  ")
+    ? [l.referrer_name, l.referrer_phone, l.referrer_city].filter(Boolean).join("  |  ")
     : "-";
-  put(c, referrer, left + labelW, y + 8, {
-    size: 8.5,
-    bold: !!l.referrer_name,
-    maxWidth: inner - labelW,
-  });
+  put(c, referrer, left + labelW, y + 8, { size: 8.5, bold: !!l.referrer_name, maxWidth: inner - labelW });
   y += 13;
 
   // loan details
   put(
     c,
     `Loan #${String(l.loan_ref).toUpperCase()}  |  Issued ${fmtDate(l.issued_date)}  |  Week ${l.current_week} of ${l.total_weeks}  |  Term ${fmtMonths(l.total_months)}`,
-    left,
-    y + 8,
-    { size: 8.5, maxWidth: inner },
+    left, y + 8, { size: 8.5, maxWidth: inner },
   );
   y += 13;
   put(
     c,
     `Principal ${rs(l.nominal_amount)}  |  Fee ${rs(l.upfront_fee)}  |  Disbursed ${rs(l.disbursed_amount)}  |  Total payable ${rs(l.total_payable_amount)}  |  Weekly ${rs(l.weekly_payable_amount)}`,
-    left,
-    y + 8,
-    { size: 8.5, maxWidth: inner },
+    left, y + 8, { size: 8.5, maxWidth: inner },
   );
   y += 13 + 4;
 
@@ -321,10 +254,7 @@ function drawBlock(c: Ctx, l: SheetLoan, index: number, top: number): void {
     const cx = left + (i % CELLS_PER_ROW) * CELL_W;
     const cy = y + Math.floor(i / CELLS_PER_ROW) * CELL_H;
     const paid = Number(wk.paid);
-    const used = put(c, `W${wk.week} - `, cx, cy + 10, {
-      size: 8.5,
-      color: MUTED,
-    });
+    const used = put(c, `W${wk.week} - `, cx, cy + 10, { size: 8.5, color: MUTED });
     put(c, num(paid), cx + used, cy + 10, {
       size: 9,
       bold: true,
@@ -334,16 +264,8 @@ function drawBlock(c: Ctx, l: SheetLoan, index: number, top: number): void {
 }
 
 function runningHeader(c: Ctx, weekday: string): number {
-  put(c, `Weekly collection sheet  |  ${cap(weekday)}`, M, M + 8, {
-    size: 8.5,
-    color: MUTED,
-  });
-  c.doc
-    .moveTo(M, M + 15)
-    .lineTo(PAGE_W - M, M + 15)
-    .lineWidth(0.5)
-    .strokeColor(LINE)
-    .stroke();
+  put(c, `Weekly collection sheet  |  ${cap(weekday)}`, M, M + 8, { size: 8.5, color: MUTED });
+  c.doc.moveTo(M, M + 15).lineTo(PAGE_W - M, M + 15).lineWidth(0.5).strokeColor(LINE).stroke();
   return M + 24;
 }
 
@@ -357,13 +279,10 @@ export function renderWeekdaySheet(input: SheetInput): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",
-      font: undefined, // do not load the built-in Helvetica (Vercel does not ship its data files)
+      font: NO_DEFAULT_FONT,
       margin: M,
       bufferPages: true,
-      info: {
-        Title: `Weekly collection sheet - ${cap(input.weekday)}`,
-        Author: "Micro lending",
-      },
+      info: { Title: `Weekly collection sheet - ${cap(input.weekday)}`, Author: "Micro lending" },
     });
     const chunks: Buffer[] = [];
     doc.on("data", (d: Buffer) => chunks.push(d));
@@ -375,37 +294,16 @@ export function renderWeekdaySheet(input: SheetInput): Promise<Buffer> {
       const { loans } = input;
 
       put(c, "Weekly collection sheet", M, M + 14, { size: 17, bold: true });
-      putRight(c, input.weekday, PAGE_W - M, M + 14, {
-        size: 17,
-        bold: true,
-        color: "#1D4ED8",
-      });
+      putRight(c, input.weekday, PAGE_W - M, M + 14, { size: 17, bold: true, color: "#1D4ED8" });
       const generated = input.generatedAt.toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
+        timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", hour12: true,
       });
-      put(
-        c,
-        `Generated ${generated} IST  |  ${loans.length} loan${loans.length === 1 ? "" : "s"}  |  W = amount paid that week`,
-        M,
-        M + 30,
-        { size: 8.5, color: MUTED },
-      );
+      put(c, `Generated ${generated} IST  |  ${loans.length} loan${loans.length === 1 ? "" : "s"}  |  W = amount paid that week`, M, M + 30, { size: 8.5, color: MUTED });
       let y = M + 46;
 
       if (loans.length === 0) {
-        put(
-          c,
-          `No active or overdue loans for customers who pay on ${cap(input.weekday)}.`,
-          M,
-          y + 20,
-          { size: 11, color: MUTED },
-        );
+        put(c, `No active or overdue loans for customers who pay on ${cap(input.weekday)}.`, M, y + 20, { size: 11, color: MUTED });
       }
 
       loans.forEach((l, i) => {
@@ -424,13 +322,7 @@ export function renderWeekdaySheet(input: SheetInput): Promise<Buffer> {
         doc.switchToPage(i);
         const keep = doc.page.margins.bottom;
         doc.page.margins.bottom = 0;
-        putRight(
-          c,
-          `Page ${i + 1} of ${range.count}`,
-          PAGE_W - M,
-          PAGE_H - M + 4,
-          { size: 8, color: MUTED },
-        );
+        putRight(c, `Page ${i + 1} of ${range.count}`, PAGE_W - M, PAGE_H - M + 4, { size: 8, color: MUTED });
         doc.page.margins.bottom = keep;
       }
       doc.end();
@@ -440,6 +332,7 @@ export function renderWeekdaySheet(input: SheetInput): Promise<Buffer> {
     }
   });
 }
+
 
 // ===========================================================================
 // Generic table PDF (landscape A4): header row repeats on every page
@@ -468,12 +361,7 @@ function cellText(col: ExportColumn, v: unknown): string {
   if (v === null || v === undefined || v === "") return "-";
   if (col.kind === "int") return num(Number(v));
   if (col.kind === "pct") return `${Number(v).toFixed(1)}%`;
-  if (
-    col.kind === "date" &&
-    typeof v === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(v)
-  )
-    return fmtDate(v);
+  if (col.kind === "date" && typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return fmtDate(v);
   return String(v).replace(/\s+/g, " ").trim();
 }
 
@@ -482,7 +370,7 @@ export function renderTablePdf(input: TableInput): Promise<Buffer> {
     const doc = new PDFDocument({
       size: "A4",
       layout: "landscape",
-      font: undefined,
+      font: NO_DEFAULT_FONT,
       margin: TM,
       bufferPages: true,
       info: { Title: input.title, Author: "Micro lending" },
@@ -500,9 +388,7 @@ export function renderTablePdf(input: TableInput): Promise<Buffer> {
 
       // column widths: proportional to the Excel widths, filling the page
       // (a column is never narrower than its own header)
-      const weight = columns.map((col) =>
-        Math.max(col.width, col.header.length + 3),
-      );
+      const weight = columns.map((col) => Math.max(col.width, col.header.length + 3));
       const totalW = weight.reduce((s, w) => s + w, 0);
       const widths = weight.map((w) => (w / totalW) * T_CONTENT_W);
       const xs: number[] = [];
@@ -513,42 +399,25 @@ export function renderTablePdf(input: TableInput): Promise<Buffer> {
         columns.forEach((col, i) => {
           const o = { size, bold: true, maxWidth: widths[i] - 2 * padX };
           const right = col.kind === "int" || col.kind === "pct";
-          if (right)
-            putRight(c, col.header, xs[i] + widths[i] - padX, y + 12, o);
+          if (right) putRight(c, col.header, xs[i] + widths[i] - padX, y + 12, o);
           else put(c, col.header, xs[i] + padX, y + 12, o);
         });
         return y + HEAD_H;
       };
 
       const generated = input.generatedAt.toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
+        timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", hour12: true,
       });
       put(c, input.title, TM, TM + 14, { size: 16, bold: true });
-      const sub = [
-        input.subtitle,
-        `${rows.length} row${rows.length === 1 ? "" : "s"}`,
-        `Generated ${generated} IST`,
-      ]
+      const sub = [input.subtitle, `${rows.length} row${rows.length === 1 ? "" : "s"}`, `Generated ${generated} IST`]
         .filter(Boolean)
         .join("  |  ");
-      put(c, sub, TM, TM + 30, {
-        size: 8.5,
-        color: MUTED,
-        maxWidth: T_CONTENT_W,
-      });
+      put(c, sub, TM, TM + 30, { size: 8.5, color: MUTED, maxWidth: T_CONTENT_W });
       let y = drawHead(TM + 40);
 
       if (rows.length === 0) {
-        put(c, "No rows match these filters.", TM, y + 20, {
-          size: 11,
-          color: MUTED,
-        });
+        put(c, "No rows match these filters.", TM, y + 20, { size: 11, color: MUTED });
       }
 
       rows.forEach((row, ri) => {
@@ -556,8 +425,7 @@ export function renderTablePdf(input: TableInput): Promise<Buffer> {
           doc.addPage();
           y = drawHead(TM);
         }
-        if (ri % 2 === 1)
-          doc.rect(TM, y, T_CONTENT_W, ROW_H).fillColor(ZEBRA).fill();
+        if (ri % 2 === 1) doc.rect(TM, y, T_CONTENT_W, ROW_H).fillColor(ZEBRA).fill();
         columns.forEach((col, i) => {
           const text = cellText(col, row[col.key]);
           const o = { size, maxWidth: widths[i] - 2 * padX };
@@ -575,10 +443,7 @@ export function renderTablePdf(input: TableInput): Promise<Buffer> {
         doc.switchToPage(i);
         const keep = doc.page.margins.bottom;
         doc.page.margins.bottom = 0;
-        putRight(c, `Page ${i + 1} of ${range.count}`, LW - TM, LH - TM + 6, {
-          size: 8,
-          color: MUTED,
-        });
+        putRight(c, `Page ${i + 1} of ${range.count}`, LW - TM, LH - TM + 6, { size: 8, color: MUTED });
         doc.page.margins.bottom = keep;
       }
       doc.end();
