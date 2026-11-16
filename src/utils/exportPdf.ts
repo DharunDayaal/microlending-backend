@@ -82,6 +82,7 @@ function loadFonts(doc: Doc): FontSet {
       "PDF fonts not found; Tamil text will not print. Looked in: " +
         FONT_DIRS.join(", "),
     );
+    doc.font("Helvetica"); // built-in fallback (needs pdfkit's standard-fonts files on the server)
     return {
       L: "Helvetica",
       LB: "Helvetica-Bold",
@@ -356,6 +357,7 @@ export function renderWeekdaySheet(input: SheetInput): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",
+      font: undefined, // do not load the built-in Helvetica (Vercel does not ship its data files)
       margin: M,
       bufferPages: true,
       info: {
@@ -480,6 +482,7 @@ export function renderTablePdf(input: TableInput): Promise<Buffer> {
     const doc = new PDFDocument({
       size: "A4",
       layout: "landscape",
+      font: undefined,
       margin: TM,
       bufferPages: true,
       info: { Title: input.title, Author: "Micro lending" },
