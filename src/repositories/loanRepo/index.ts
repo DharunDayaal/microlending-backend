@@ -177,12 +177,15 @@ export async function findLoanByIdRepo(loanId: string): Promise<Loan | null> {
   return result.rows[0] ?? null;
 }
 
-export async function getLoanTotalsRepo(loanId: string): Promise<{
+export async function getLoanTotalsRepo(
+  loanId: string,
+  client: Pool | PoolClient = getPool(),
+): Promise<{
   total_collected: number;
   paid_weeks: number;
   partial_weeks: number;
 }> {
-  const result = await getPool().query(
+  const result = await client.query(
     `
       SELECT
         COALESCE(SUM(total_collected), 0)::int AS total_collected,

@@ -47,6 +47,7 @@ function auditStatusChange(
 async function assertLoanAccess(
   loan: Loan,
   user: RequestingUser,
+  client?: PoolClient,
 ): Promise<void> {
   if (user.role === "SUPER_ADMIN") return;
   if (loan.owning_admin_id !== user.teamId) {
@@ -54,7 +55,10 @@ async function assertLoanAccess(
   }
   // employees see every loan (whoever issued it) of customers they created
   if (user.role === "USER") {
-    const customer = await findCustomerAccessInfoRepo(loan.customer_id);
+    const customer = await findCustomerAccessInfoRepo(
+      loan.customer_id,
+      client,
+    );
     if (!customer || customer.created_by !== user.id) {
       throw new AppError(403, "You don't have access to this loan");
     }
@@ -216,7 +220,8 @@ export async function collectPayment(
     if (!loan) {
       throw new AppError(404, "Loan not found");
     }
-    await assertLoanAccess(loan, user);
+    // use the transaction's client: a second pool connection here can starve the pool
+    await assertLoanAccess(loan, user, client);
 
     if (loan.status !== "ACTIVE" && loan.status !== "OVERDUE") {
       throw new AppError(
@@ -476,7 +481,7 @@ export async function updateLoanStatus(
       }
 
       // outstanding at the moment of the change matters for DEFAULTED / CLOSED
-      const totals = await LoanRepository.getLoanTotalsRepo(loanId);
+      const totals = await LoanRepository.getLoanTotalsRepo(loanId, client);
       await auditStatusChange(
         client,
         loan,
