@@ -190,12 +190,23 @@ export async function changePassword(
     ? hashRefreshToken(payload.refresh_token)
     : null;
 
-  return withTransaction(async (client) => {
-    const currentHash = await Repo.findPasswordHashRepo(user.id, client);
-    if (!currentHash) throw new AppError(404, "Account not found");
+  // bcrypt runs before the transaction so it doesn't hold a pool connection
+  const currentHash = await Repo.findPasswordHashRepo(user.id);
+  if (!currentHash) throw new AppError(404, "Account not found");
 
-    const ok = await comparePassword(payload.current_password, currentHash);
-    if (!ok) throw new AppError(400, "Current password is incorrect");
+  const ok = await comparePassword(payload.current_password, currentHash);
+  if (!ok) throw new AppError(400, "Current password is incorrect");
+
+  return withTransaction(async (client) => {
+    // lock the row and make sure the password didn't change while we compared
+    const lockedHash = await Repo.findPasswordHashRepo(user.id, client, true);
+    if (!lockedHash) throw new AppError(404, "Account not found");
+    if (lockedHash !== currentHash) {
+      throw new AppError(
+        409,
+        "Your password was just changed. Please try again",
+      );
+    }
 
     await Repo.updatePasswordHashRepo(client, user.id, newHash);
     const revoked = await Repo.revokeSessionsRepo(client, user.id, keepHash);
@@ -349,7 +360,7 @@ export async function updateLimits(
     // one writer at a time; the read below then sees the latest committed limits
     await client.query("SELECT pg_advisory_xact_lock(hashtext('loan_limits'))");
 
-    const before = await Repo.getLimitsRepo();
+    const before = await Repo.getLimitsRepo(client);
     const next: Repo.Limits = { ...before };
     for (const [k, v] of Object.entries(payload)) {
       if (v !== undefined) (next as unknown as Record<string, number>)[k] = v;
@@ -535,7 +546,7 @@ async function setAdminFlag(
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
       `admin-flag:${adminId}`,
     ]);
-    const before = await Repo.findUserRepo(adminId); // read after the lock
+    const before = await Repo.findUserRepo(adminId, client); // read after the lock
     if (!before || before.role !== "ADMIN") {
       throw new AppError(404, "Admin not found");
     }

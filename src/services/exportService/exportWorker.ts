@@ -27,6 +27,15 @@ class PermanentError extends Error {}
 /** Another worker took this job over, so stop quietly. */
 class LostJobError extends Error {}
 
+/**
+ * How long one export may run. Kept well under the function's maxDuration
+ * (300s, see src/index.ts) so there is time left to upload and mark the job,
+ * instead of Vercel killing it halfway and the job being retried forever.
+ */
+const EXPORT_TIME_BUDGET_MS = 240_000;
+const TOO_SLOW_MESSAGE =
+  "This export took too long to build. Narrow the dates or filters, or choose CSV.";
+
 export type RunResult =
   | { ran: false }
   | { ran: true; id: string; status: string; rows?: number; ms?: number };
@@ -97,6 +106,9 @@ export async function runNextExport(): Promise<RunResult> {
       cursor = batch.next;
       if (!(await Repo.heartbeatExportRepo(job.id, processed)))
         throw new LostJobError();
+      // retrying would hit the same limit, so fail for good
+      if (Date.now() - started > EXPORT_TIME_BUDGET_MS)
+        throw new PermanentError(TOO_SLOW_MESSAGE);
     } while (cursor);
 
     const { filePath, size } = await sink.finish();

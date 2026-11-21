@@ -154,12 +154,15 @@ export async function getUsersOnWeekdayRepo(
 /**
  * Lightweight lookup used only for access checks (and loan-issue ownership).
  */
-export async function findCustomerAccessInfoRepo(customerId: string): Promise<{
+export async function findCustomerAccessInfoRepo(
+  customerId: string,
+  client: Pool | PoolClient = getPool(),
+): Promise<{
   id: string;
   owning_admin_id: string;
   created_by: string;
 } | null> {
-  const result = await getPool().query(
+  const result = await client.query(
     `SELECT id, owning_admin_id, created_by FROM customers WHERE id = $1`,
     [customerId],
   );

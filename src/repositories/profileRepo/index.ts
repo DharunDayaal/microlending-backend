@@ -61,10 +61,11 @@ export async function findUserRepo(
 
 export async function findPasswordHashRepo(
   id: string,
-  client: Client,
+  client: Client = getPool(),
+  forUpdate = false,
 ): Promise<string | null> {
   const response = await client.query(
-    `SELECT password_hash FROM users WHERE id = $1 FOR UPDATE`,
+    `SELECT password_hash FROM users WHERE id = $1${forUpdate ? " FOR UPDATE" : ""}`,
     [id],
   );
   return response.rows[0]?.password_hash ?? null;

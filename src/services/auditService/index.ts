@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { AppError } from "../../helpers";
+import { AppError, logger } from "../../helpers";
 import * as Repo from "../../repositories/auditRepo";
 import type { RequestingUser } from "../../types/authTypes";
 import type {
@@ -108,14 +108,20 @@ export async function recordAudit(db: Db, entry: AuditEntry): Promise<boolean> {
 }
 
 /**
- * Fire-and-forget version for events that have no transaction to join
- * (failed logins, exports). Never awaited, never throws: a logging failure
- * must not break the request. Do NOT use it for data changes.
+ * For events that have no transaction to join (failed logins, exports).
+ * Await it: on Vercel the function can freeze once the response is sent, which
+ * would drop the row and leave its pool connection mid-query. Never throws, so
+ * a logging failure can't break the request. Do NOT use it for data changes.
  */
-export function recordAuditSafe(db: Db, entry: AuditEntry): void {
-  recordAudit(db, entry).catch((err) => {
-    console.error("[audit] could not record", entry.action, err);
-  });
+export async function recordAuditSafe(
+  db: Db,
+  entry: AuditEntry,
+): Promise<void> {
+  try {
+    await recordAudit(db, entry);
+  } catch (err) {
+    logger.error({ err, action: entry.action }, "[audit] could not record");
+  }
 }
 
 /**

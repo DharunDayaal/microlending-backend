@@ -40,8 +40,8 @@ function auditLoginFailed(
   account: { id: string } | null,
   identifier: string,
   meta?: AuditMeta,
-): void {
-  recordAuditSafe(getPool(), {
+): Promise<void> {
+  return recordAuditSafe(getPool(), {
     action: AUDIT.LOGIN_FAILED,
     actor_id: null,
     target_id: account?.id ?? null,
@@ -56,8 +56,8 @@ function auditLoginBlocked(
   account: { id: string },
   credentialsVerified: boolean,
   meta?: AuditMeta,
-): void {
-  recordAuditSafe(getPool(), {
+): Promise<void> {
+  return recordAuditSafe(getPool(), {
     action: AUDIT.LOGIN_BLOCKED,
     actor_id: null,
     target_id: account.id,
@@ -156,7 +156,7 @@ export async function loginByEmail(
 ): Promise<{ tokens: TokenPair; admin: AdminUserPublic }> {
   const admin = await AuthRepository.findAdminByEmailRepo(payload.email);
   if (!admin) {
-    auditLoginFailed("EMAIL", "UNKNOWN_ACCOUNT", null, payload.email, meta);
+    await auditLoginFailed("EMAIL", "UNKNOWN_ACCOUNT", null, payload.email, meta);
     throw new AppError(401, "Invalid email or password");
   }
 
@@ -165,12 +165,12 @@ export async function loginByEmail(
     admin.password_hash,
   );
   if (!isPasswordValid) {
-    auditLoginFailed("EMAIL", "WRONG_PASSWORD", admin, payload.email, meta);
+    await auditLoginFailed("EMAIL", "WRONG_PASSWORD", admin, payload.email, meta);
     throw new AppError(401, "Invalid email or password");
   }
 
   if (!admin.is_verified) {
-    auditLoginBlocked("EMAIL", "ACCOUNT_PENDING_APPROVAL", admin, true, meta);
+    await auditLoginBlocked("EMAIL", "ACCOUNT_PENDING_APPROVAL", admin, true, meta);
     throw new AppError(
       403,
       "Your account is pending approval from a super admin",
@@ -180,7 +180,7 @@ export async function loginByEmail(
   }
 
   if (!admin.is_active) {
-    auditLoginBlocked("EMAIL", "ACCOUNT_DEACTIVATED", admin, true, meta);
+    await auditLoginBlocked("EMAIL", "ACCOUNT_DEACTIVATED", admin, true, meta);
     throw new AppError(
       403,
       "Your account has been deactivated",
@@ -217,7 +217,7 @@ export async function loginByPhoneNumber(
     payload.phone_number,
   );
   if (!admin) {
-    auditLoginFailed(
+    await auditLoginFailed(
       "PHONE_OTP",
       "UNKNOWN_ACCOUNT",
       null,
@@ -227,7 +227,7 @@ export async function loginByPhoneNumber(
     throw new AppError(401, "Invalid phone number or OTP");
   }
   if (!admin.is_verified) {
-    auditLoginBlocked(
+    await auditLoginBlocked(
       "PHONE_OTP",
       "ACCOUNT_PENDING_APPROVAL",
       admin,
@@ -242,7 +242,7 @@ export async function loginByPhoneNumber(
     );
   }
   if (!admin.is_active) {
-    auditLoginBlocked("PHONE_OTP", "ACCOUNT_DEACTIVATED", admin, false, meta);
+    await auditLoginBlocked("PHONE_OTP", "ACCOUNT_DEACTIVATED", admin, false, meta);
     throw new AppError(
       403,
       "Your account has been deactivated",
@@ -296,7 +296,7 @@ export async function loginByPhoneNumber(
   });
 
   if (!outcome.ok) {
-    auditLoginFailed(
+    await auditLoginFailed(
       "PHONE_OTP",
       outcome.message,
       admin,
@@ -472,11 +472,5 @@ export async function revokeAllRefreshToken(
         meta,
       });
     });
-  }
-  if (record && !record.revoked_at) {
-    await RefreshRepository.revokeAllRefreshTokensForUserRepo(
-      getPool(),
-      record.user_id,
-    );
   }
 }
