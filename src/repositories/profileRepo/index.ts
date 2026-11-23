@@ -143,13 +143,19 @@ export interface SessionRow {
   expires_at: string;
 }
 
-export async function listSessionsRepo(userId: string): Promise<SessionRow[]> {
+/** Fetches limit + 1 rows (see pageFromExtraRow). */
+export async function listSessionsRepo(
+  userId: string,
+  limit: number,
+  offset: number,
+): Promise<SessionRow[]> {
   const response = await getPool().query(
     `SELECT id, created_at, expires_at
        FROM refresh_tokens
       WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
-      ORDER BY created_at DESC`,
-    [userId],
+      ORDER BY created_at DESC, id DESC
+      LIMIT $2 OFFSET $3`,
+    [userId, limit + 1, offset],
   );
   return response.rows as SessionRow[];
 }
@@ -193,7 +199,12 @@ export interface MemberRow {
   customers_count: number;
 }
 
-export async function listMembersRepo(adminId: string): Promise<MemberRow[]> {
+/** Fetches limit + 1 rows (see pageFromExtraRow). */
+export async function listMembersRepo(
+  adminId: string,
+  limit: number,
+  offset: number,
+): Promise<MemberRow[]> {
   const response = await getPool().query(
     `SELECT u.id, u.user_name, u.phone_number, u.role, u.is_active,
             u.is_verified, u.created_at,
@@ -201,10 +212,20 @@ export async function listMembersRepo(adminId: string): Promise<MemberRow[]> {
               AS customers_count
        FROM users u
       WHERE u.admin_id = $1
-      ORDER BY u.user_name`,
-    [adminId],
+      ORDER BY u.user_name, u.id
+      LIMIT $2 OFFSET $3`,
+    [adminId, limit + 1, offset],
   );
   return response.rows as MemberRow[];
+}
+
+export async function countPendingMembersRepo(adminId: string): Promise<number> {
+  const response = await getPool().query(
+    `SELECT COUNT(*)::int AS n FROM users
+      WHERE admin_id = $1 AND is_verified = false`,
+    [adminId],
+  );
+  return response.rows[0].n as number;
 }
 
 export interface TeamRow {
@@ -216,7 +237,11 @@ export interface TeamRow {
   pending_count: number;
 }
 
-export async function listTeamsRepo(): Promise<TeamRow[]> {
+/** Fetches limit + 1 rows (see pageFromExtraRow). */
+export async function listTeamsRepo(
+  limit: number,
+  offset: number,
+): Promise<TeamRow[]> {
   const response = await getPool().query(
     `SELECT a.id AS admin_id, a.user_name, a.is_active, a.is_verified,
             COUNT(m.id)::int AS members_count,
@@ -225,7 +250,9 @@ export async function listTeamsRepo(): Promise<TeamRow[]> {
        LEFT JOIN users m ON m.admin_id = a.id
       WHERE a.role = 'ADMIN' AND a.is_verified = true
       GROUP BY a.id
-      ORDER BY a.user_name`,
+      ORDER BY a.user_name, a.id
+      LIMIT $1 OFFSET $2`,
+    [limit + 1, offset],
   );
   return response.rows as TeamRow[];
 }

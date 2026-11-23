@@ -14,7 +14,7 @@ import type {
   SuperGeographyQuery,
   SuperLeaderboardQuery,
   SuperLimitQuery,
-  SuperRangeQuery,
+  SuperAdminsPerformanceQuery,
   SuperSplitTrendQuery,
   SuperTrendQuery,
   TrendQuery,
@@ -123,7 +123,7 @@ export const platformOverview = handle(
 export const adminsPerformance = handle(
   "Admin performance fetched successfully",
   (req, res) =>
-    Service.getAdminsPerformance(req.user!, q<SuperRangeQuery>(res)),
+    Service.getAdminsPerformance(req.user!, q<SuperAdminsPerformanceQuery>(res)),
 );
 export const adminsGrowth = handle(
   "Admin growth fetched successfully",

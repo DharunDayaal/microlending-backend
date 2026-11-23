@@ -765,9 +765,11 @@ export async function getRepeatBorrowersRepo(scope: Scope): Promise<{
   return result[0];
 }
 
+/** Fetches limit + 1 rows (see pageFromExtraRow). */
 export async function getReferralPerformanceRepo(
   scope: Scope,
   limit: number,
+  offset: number,
 ): Promise<
   {
     referrer_id: string;
@@ -779,7 +781,7 @@ export async function getReferralPerformanceRepo(
 > {
   const values: unknown[] = [];
   const clause = customerScope(scope, values);
-  values.push(limit);
+  values.push(limit + 1, offset);
   return rows(
     `
     SELECT u.id AS referrer_id,
@@ -796,16 +798,19 @@ export async function getReferralPerformanceRepo(
     JOIN customers c ON c.referred_by_id = u.id
     WHERE 1 = 1 ${clause}
     GROUP BY u.id, u.customer_name
-    ORDER BY referred DESC, converted DESC
-    LIMIT $${values.length}
+    ORDER BY referred DESC, converted DESC, u.id
+    LIMIT $${values.length - 1} OFFSET $${values.length}
     `,
     values,
   );
 }
 
+/** Fetches limit + 1 rows (see pageFromExtraRow). */
 export async function getGeographyRepo(
   scope: Scope,
   level: "district" | "city",
+  limit: number,
+  offset: number,
 ): Promise<
   {
     area: string;
@@ -820,6 +825,7 @@ export async function getGeographyRepo(
   const col = level === "city" ? "city" : "district";
   const values: unknown[] = [];
   const b = base(scope, values);
+  values.push(limit + 1, offset);
   return rows(
     `
     WITH ${b}
@@ -832,8 +838,8 @@ export async function getGeographyRepo(
            COALESCE(SUM(outstanding) FILTER (WHERE status IN (${LIVE}) AND outstanding > 0 AND dpd > 0), 0)::float8 AS par_amount
     FROM lc
     GROUP BY 1
-    ORDER BY outstanding DESC
-    LIMIT 50
+    ORDER BY outstanding DESC, area
+    LIMIT $${values.length - 1} OFFSET $${values.length}
     `,
     values,
   );
@@ -956,15 +962,19 @@ export async function getPlatformCountsRepo(): Promise<{
   return r[0];
 }
 
+/** Fetches limit + 1 rows (see pageFromExtraRow). */
 export async function getAdminsPerformanceRepo(
   from: string,
   to: string,
+  limit: number,
+  offset: number,
 ): Promise<Record<string, unknown>[]> {
   const values: unknown[] = [];
   const b = base({}, values);
   values.push(from, to);
   const f = values.length - 1;
   const t = values.length;
+  values.push(limit + 1, offset);
   return rows(
     `
     WITH ${b},
@@ -1034,7 +1044,8 @@ export async function getAdminsPerformanceRepo(
     LEFT JOIN pay ON pay.admin_id = adm.id
     LEFT JOIN cust ON cust.admin_id = adm.id
     LEFT JOIN emp ON emp.admin_id = adm.id
-    ORDER BY collected_in_range DESC, outstanding DESC
+    ORDER BY collected_in_range DESC, outstanding DESC, adm.id
+    LIMIT $${values.length - 1} OFFSET $${values.length}
     `,
     values,
   );
@@ -1084,7 +1095,11 @@ export async function getAdminsGrowthRepo(
   );
 }
 
-export async function getRiskConcentrationRepo(limit: number): Promise<{
+/** top_exposures fetches limit + 1 rows (see pageFromExtraRow); by_admin is complete. */
+export async function getRiskConcentrationRepo(
+  limit: number,
+  offset: number,
+): Promise<{
   by_admin: Record<string, unknown>[];
   top_exposures: Record<string, unknown>[];
 }> {
@@ -1113,7 +1128,7 @@ export async function getRiskConcentrationRepo(limit: number): Promise<{
 
   const v2: unknown[] = [];
   const b2 = base({}, v2);
-  v2.push(limit);
+  v2.push(limit + 1, offset);
   const top = await rows(
     `
     WITH ${b2}
@@ -1124,8 +1139,8 @@ export async function getRiskConcentrationRepo(limit: number): Promise<{
            lc.dpd::int AS days_past_due
     FROM lc
     WHERE lc.status IN (${LIVE}) AND lc.outstanding > 0
-    ORDER BY lc.outstanding DESC
-    LIMIT $${v2.length}
+    ORDER BY lc.outstanding DESC, lc.id
+    LIMIT $${v2.length - 1} OFFSET $${v2.length}
     `,
     v2,
   );

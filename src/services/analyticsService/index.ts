@@ -1,6 +1,11 @@
 import { AppError } from "../../helpers";
 import * as Repo from "../../repositories/analyticsRepo";
 import { RequestingUser } from "../../types/authTypes";
+import {
+  pageFromExtraRow,
+  pageOffset,
+  paginationMetadata,
+} from "../../utils/pagination";
 import type {
   EmployeesQuery,
   ForecastQuery,
@@ -14,7 +19,7 @@ import type {
   SuperGeographyQuery,
   SuperLeaderboardQuery,
   SuperLimitQuery,
-  SuperRangeQuery,
+  SuperAdminsPerformanceQuery,
   SuperSplitTrendQuery,
   SuperTrendQuery,
   TrendQuery,
@@ -78,13 +83,6 @@ function resolveRange(q: { from?: string; to?: string }) {
 const AGING_ORDER = ["CURRENT", "1-7", "8-14", "15-30", "30+"];
 const STATUS_ORDER = ["ACTIVE", "OVERDUE", "DEFAULTED", "PAID_OFF", "CLOSED"];
 
-function paginationMetadata(page: number, limit: number, total: number) {
-  return {
-    current_page: page,
-    limit,
-    has_next_page: page * limit < total,
-  };
-}
 
 function fillAging(
   rows: { bucket: string; loans: number; outstanding: number }[],
@@ -402,28 +400,42 @@ export async function getReferralPerformance(
   user: RequestingUser,
   q: LimitQuery,
 ) {
-  const rows = await Repo.getReferralPerformanceRepo(
-    resolveScope(user, q),
-    q.limit,
+  const page = pageFromExtraRow(
+    await Repo.getReferralPerformanceRepo(
+      resolveScope(user, q),
+      q.limit,
+      pageOffset(q),
+    ),
+    q,
   );
   return {
-    referrers: rows.map((r) => ({
+    referrers: page.rows.map((r) => ({
       ...r,
       conversion_pct: pct(r.converted, r.referred),
     })),
+    metadata: page.metadata,
   };
 }
 
 export async function getGeography(user: RequestingUser, q: GeographyQuery) {
   requireAdmin(user);
-  const rows = await Repo.getGeographyRepo(resolveScope(user, q), q.level);
+  const page = pageFromExtraRow(
+    await Repo.getGeographyRepo(
+      resolveScope(user, q),
+      q.level,
+      q.limit,
+      pageOffset(q),
+    ),
+    q,
+  );
   return {
     level: q.level,
-    areas: rows.map((r) => ({
+    areas: page.rows.map((r) => ({
       ...r,
       overdue_pct: pct(r.overdue_loans, r.active_loans),
       par_pct: pct(r.par_amount, r.outstanding),
     })),
+    metadata: page.metadata,
   };
 }
 
@@ -538,15 +550,19 @@ export async function getPlatformOverview(user: RequestingUser) {
 
 export async function getAdminsPerformance(
   user: RequestingUser,
-  q: SuperRangeQuery,
+  q: SuperAdminsPerformanceQuery,
 ) {
   requireSuperAdmin(user);
   const { from, to } = resolveRange(q);
-  const rows = await Repo.getAdminsPerformanceRepo(from, to);
+  const page = pageFromExtraRow(
+    await Repo.getAdminsPerformanceRepo(from, to, q.limit, pageOffset(q)),
+    q,
+  );
   return {
     from,
     to,
-    admins: rows.map((r: any) => ({
+    metadata: page.metadata,
+    admins: page.rows.map((r: any) => ({
       admin_id: r.admin_id,
       name: r.name,
       customers: r.customers,
@@ -637,7 +653,8 @@ export async function getRiskConcentration(
   q: SuperLimitQuery,
 ) {
   requireSuperAdmin(user);
-  const r = await Repo.getRiskConcentrationRepo(q.limit);
+  const r = await Repo.getRiskConcentrationRepo(q.limit, pageOffset(q));
+  const top = pageFromExtraRow(r.top_exposures, q);
   const total = r.by_admin.reduce((s, a: any) => s + a.outstanding, 0);
   return {
     total_outstanding: total,
@@ -646,10 +663,12 @@ export async function getRiskConcentration(
       share_pct: pct(a.outstanding, total),
       par_pct: pct(a.par_amount, a.outstanding),
     })),
-    top_exposures: r.top_exposures.map((e: any) => ({
+    // metadata pages top_exposures; by_admin is always complete
+    top_exposures: top.rows.map((e: any) => ({
       ...e,
       share_pct: pct(e.outstanding, total),
     })),
+    metadata: top.metadata,
   };
 }
 
@@ -679,14 +698,18 @@ export async function getPlatformGeography(
   q: SuperGeographyQuery,
 ) {
   requireSuperAdmin(user);
-  const rows = await Repo.getGeographyRepo({}, q.level);
+  const page = pageFromExtraRow(
+    await Repo.getGeographyRepo({}, q.level, q.limit, pageOffset(q)),
+    q,
+  );
   return {
     level: q.level,
-    areas: rows.map((r) => ({
+    areas: page.rows.map((r) => ({
       ...r,
       overdue_pct: pct(r.overdue_loans, r.active_loans),
       par_pct: pct(r.par_amount, r.outstanding),
     })),
+    metadata: page.metadata,
   };
 }
 

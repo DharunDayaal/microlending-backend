@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { paginationShape } from "../../utils/pagination";
 
 const uuid = z.uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
@@ -137,4 +138,7 @@ export const createExportSchema = z.discriminatedUnion("type", [
 ]);
 
 export const exportIdParamSchema = z.uuid();
+
+export const listExportsQuerySchema = z.object({ ...paginationShape(20, 50) });
+export type ListExportsQuery = z.infer<typeof listExportsQuerySchema>;
 export type CreateExportSchema = z.infer<typeof createExportSchema>;

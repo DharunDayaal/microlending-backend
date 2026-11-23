@@ -22,6 +22,12 @@ import {
   User,
 } from "../../types/userTypes";
 import { withTransaction } from "../../config/database";
+import {
+  PageParams,
+  PaginationMetadata,
+  pageFromExtraRow,
+  pageOffset,
+} from "../../utils/pagination";
 import { AUDIT } from "../../constants/auditActions";
 import { changedValues, recordAudit } from "../../services/auditService";
 
@@ -116,10 +122,16 @@ export async function getUserById(userId: string, user: RequestingUser) {
 }
 
 export async function getUsersOnWeekday(
-  payload: GetUsersOnWeekdayPayload,
+  q: Pick<GetUsersOnWeekdayPayload, "weekday" | "search"> & PageParams,
   user: RequestingUser,
-) {
-  return getUsersOnWeekdayRepo({ ...payload, ...getScope(user) });
+): Promise<{ rows: User[]; metadata: PaginationMetadata }> {
+  const rows = await getUsersOnWeekdayRepo({
+    ...q,
+    limit: q.limit + 1, // one extra row says whether there is a next page
+    startIndex: pageOffset(q),
+    ...getScope(user),
+  });
+  return pageFromExtraRow(rows, q);
 }
 
 export async function checkUserExistsByPhoneNumber(phoneNumber: string) {
@@ -164,17 +176,18 @@ export async function updateUser(
 export async function getUserLoans(
   id: string,
   user: RequestingUser,
-): Promise<Loan[]> {
+  page: PageParams,
+): Promise<{ rows: Loan[]; metadata: PaginationMetadata }> {
   await requireCustomerAccess(id, user);
 
-  const rows = await findLoansByUserIdRepo(id);
-  if (rows === null) {
-    throw new AppError(404, "User not found");
-  }
+  const result = pageFromExtraRow(
+    await findLoansByUserIdRepo(id, page.limit, pageOffset(page)),
+    page,
+  );
 
-  return rows
-    .filter((row) => row.loan_id !== null)
-    .map((row) => ({
+  return {
+    metadata: result.metadata,
+    rows: result.rows.map((row) => ({
       id: row.loan_id!,
       customer_id: row.customer_id!,
       issued_by_admin_id: row.issued_by_admin_id!,
@@ -189,20 +202,24 @@ export async function getUserLoans(
       status: row.status!,
       issued_at: row.issued_at!,
       closed_at: row.closed_at,
-    }));
+    })),
+  };
 }
 
 export async function getUserReferrals(
   id: string,
   user: RequestingUser,
-): Promise<User[]> {
+  page: PageParams,
+): Promise<{ rows: User[]; metadata: PaginationMetadata }> {
   await requireCustomerAccess(id, user);
 
-  const rows = await findReferralsByUserIdRepo(id, getScope(user));
-  if (rows === null) {
-    throw new AppError(404, "User not found");
-  }
-  return rows.filter((row): row is User => row !== null && row.id !== null);
+  const rows = await findReferralsByUserIdRepo(
+    id,
+    getScope(user),
+    page.limit,
+    pageOffset(page),
+  );
+  return pageFromExtraRow(rows, page);
 }
 
 function getOwningAdminId(user: RequestingUser) {

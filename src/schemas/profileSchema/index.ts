@@ -1,5 +1,6 @@
 // place at: src/schemas/profileSchema.ts
 import { z } from "zod";
+import { paginationShape } from "../../utils/pagination";
 
 const uuid = z.uuid();
 const oneDecimal = (v: number) => Math.abs(v * 10 - Math.round(v * 10)) < 1e-9;
@@ -65,7 +66,12 @@ export const statsQuerySchema = z.object({
   admin_id: uuid.optional(), // SUPER_ADMIN + scope=team
 });
 
-export const teamQuerySchema = z.object({ admin_id: uuid.optional() });
+export const teamQuerySchema = z.object({
+  admin_id: uuid.optional(),
+  ...paginationShape(),
+});
+
+export const sessionsQuerySchema = z.object({ ...paginationShape() });
 
 export const listAdminsQuerySchema = z.object({
   status: z.enum(["pending", "active", "inactive"]).optional(),
@@ -103,5 +109,6 @@ export type ChangePasswordSchema = z.infer<typeof changePasswordSchema>;
 export type UpdateDefaultsSchema = z.infer<typeof updateDefaultsSchema>;
 export type StatsQuerySchema = z.infer<typeof statsQuerySchema>;
 export type TeamQuerySchema = z.infer<typeof teamQuerySchema>;
+export type SessionsQuerySchema = z.infer<typeof sessionsQuerySchema>;
 export type ListAdminsQuerySchema = z.infer<typeof listAdminsQuerySchema>;
 export type UpdateLimitsSchema = z.infer<typeof updateLimitsSchema>;

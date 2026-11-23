@@ -110,7 +110,7 @@ export async function getUsersOnWeekdayRepo(
   const offsetIndex = values.length;
 
   // 6. Ranking
-  let orderBy = `created_at DESC`;
+  let orderBy = `created_at DESC, id DESC`;
 
   if (hasSearch && searchParamIndex !== null) {
     orderBy = `
@@ -120,7 +120,8 @@ export async function getUsersOnWeekdayRepo(
         similarity(city, $${searchParamIndex}),
         similarity(district, $${searchParamIndex})
       ) DESC,
-      created_at DESC
+      created_at DESC,
+      id DESC
     `;
   }
 
@@ -312,53 +313,50 @@ export async function updateUserRepo(
   return result.rows[0] ?? null;
 }
 
+/** The caller checks the customer exists. Fetches limit + 1 rows (see pageFromExtraRow). */
 export async function findLoansByUserIdRepo(
   userId: string,
-): Promise<UserLoanRow[] | null> {
+  limit: number,
+  offset: number,
+): Promise<UserLoanRow[]> {
   const result = await getPool().query<UserLoanRow>(
     `
       SELECT
         l.id AS loan_id, l.customer_id, l.issued_by_admin_id, l.owning_admin_id, l.nominal_amount, l.upfront_fee, l.disbursed_amount,
         l.total_payable_amount, l.weekly_payable_amount, l.total_months, l.total_weeks,
         l.status, l.issued_at, l.closed_at
-      FROM customers u
-      LEFT JOIN loans l ON l.customer_id = u.id
-      WHERE u.id = $1
-      ORDER BY l.issued_at DESC
+      FROM loans l
+      WHERE l.customer_id = $1
+      ORDER BY l.issued_at DESC, l.id DESC
+      LIMIT $2 OFFSET $3
     `,
-    [userId],
+    [userId, limit + 1, offset],
   );
-
-  if (result.rows.length === 0) {
-    return null;
-  }
   return result.rows;
 }
 
+/** The caller checks the customer exists. Fetches limit + 1 rows (see pageFromExtraRow). */
 export async function findReferralsByUserIdRepo(
   userId: string,
-  scope: CustomerScope = {},
-): Promise<(User | null)[] | null> {
+  scope: CustomerScope,
+  limit: number,
+  offset: number,
+): Promise<User[]> {
   const result = await getPool().query(
     `
       SELECT r.id, r.customer_name, r.phone_number, r.referred_by_id,
              r.preferred_payment_day, r.preferred_payment_time, r.created_at,
              r.owning_admin_id, r.created_by,
              r.street_name, r.city, r.district
-      FROM customers u
-      LEFT JOIN customers r
-        ON r.referred_by_id = u.id
+      FROM customers r
+      WHERE r.referred_by_id = $1
         AND ($2::uuid IS NULL OR r.owning_admin_id = $2::uuid)
         AND ($3::uuid IS NULL OR r.created_by = $3::uuid)
-      WHERE u.id = $1
-      ORDER BY r.created_at DESC
+      ORDER BY r.created_at DESC, r.id DESC
+      LIMIT $4 OFFSET $5
     `,
-    [userId, scope.owningAdminId ?? null, scope.createdBy ?? null],
+    [userId, scope.owningAdminId ?? null, scope.createdBy ?? null, limit + 1, offset],
   );
-
-  if (result.rows.length === 0) {
-    return null;
-  }
   return result.rows;
 }
 

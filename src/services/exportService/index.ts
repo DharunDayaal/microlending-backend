@@ -19,7 +19,11 @@ import type {
   ExportItem,
   ExportRow,
 } from "../../types/exportTypes";
-import type { CreateExportSchema } from "../../schemas/exportSchema";
+import type {
+  CreateExportSchema,
+  ListExportsQuery,
+} from "../../schemas/exportSchema";
+import { pageFromExtraRow, pageOffset } from "../../utils/pagination";
 
 /** Largest file we will build in one go. Raise only after timing a real run. */
 export const maxRowsFor = (format: ExportFormat): number =>
@@ -164,7 +168,8 @@ export async function getExport(user: RequestingUser, id: string) {
   return item;
 }
 
-export async function listMyExports(user: RequestingUser) {
-  const rows = await Repo.listExportsRepo(user.id, 20);
-  return rows.map((r) => toItem(r));
+export async function listMyExports(user: RequestingUser, q: ListExportsQuery) {
+  const rows = await Repo.listExportsRepo(user.id, q.limit, pageOffset(q));
+  const page = pageFromExtraRow(rows, q);
+  return { rows: page.rows.map((r) => toItem(r)), metadata: page.metadata };
 }

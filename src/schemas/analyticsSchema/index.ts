@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { paginationShape } from "../../utils/pagination";
 
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
@@ -56,11 +57,12 @@ export const maturingQuerySchema = z.object({
 export const pagedQuerySchema = z.object({ ...scopeShape, page, limit });
 export const limitQuerySchema = z.object({
   ...scopeShape,
-  limit: z.coerce.number().int().min(1).max(50).default(10),
+  ...paginationShape(10, 50),
 });
 export const geographyQuerySchema = z.object({
   ...scopeShape,
   level: z.enum(["district", "city"]).default("district"),
+  ...paginationShape(50),
 });
 export const employeesQuerySchema = withRange(
   z.object({ ...scopeShape, ...rangeShape, page, limit }),
@@ -68,6 +70,9 @@ export const employeesQuerySchema = withRange(
 
 // ---- super admin level -----------------------------------------------------
 export const superRangeQuerySchema = withRange(z.object({ ...rangeShape }));
+export const superAdminsPerformanceQuerySchema = withRange(
+  z.object({ ...rangeShape, page, limit }),
+);
 export const superTrendQuerySchema = withRange(
   z.object({ ...rangeShape, group_by: groupBy }),
 );
@@ -84,11 +89,10 @@ export const superSplitTrendQuerySchema = withRange(
 export const superLeaderboardQuerySchema = withRange(
   z.object({ ...rangeShape, page, limit }),
 );
-export const superLimitQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(50).default(10),
-});
+export const superLimitQuerySchema = z.object({ ...paginationShape(10, 50) });
 export const superGeographyQuerySchema = z.object({
   level: z.enum(["district", "city"]).default("district"),
+  ...paginationShape(50),
 });
 export const superForecastQuerySchema = z.object({
   admin_id: uuid.optional(),
@@ -110,6 +114,10 @@ export type LimitQuery = z.infer<typeof limitQuerySchema>;
 export type GeographyQuery = z.infer<typeof geographyQuerySchema>;
 export type EmployeesQuery = RangeQuery & { page: number; limit: number };
 export type SuperRangeQuery = { from?: string; to?: string };
+export type SuperAdminsPerformanceQuery = SuperRangeQuery & {
+  page: number;
+  limit: number;
+};
 export type SuperTrendQuery = SuperRangeQuery & {
   group_by: "day" | "week" | "month";
 };
