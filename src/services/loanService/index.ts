@@ -9,6 +9,8 @@ import { findCustomerAccessInfoRepo } from "../../repositories/userRepo";
 import { RequestingUser } from "../../types/authTypes";
 import {
   CollectionDueLoan,
+  CollectPaymentOptions,
+  CollectPaymentResult,
   CreateLoanPayload,
   ListLoansFilters,
   Loan,
@@ -24,6 +26,29 @@ import { recordAudit } from "../../services/auditService";
 import { getLimitsRepo } from "../../repositories/profileRepo";
 
 type AuditMeta = Record<string, unknown>;
+
+/** A phone clock can be wrong or the sync late, so collected_at has limits. */
+const COLLECTED_AT_MAX_AGE_DAYS = 7;
+const COLLECTED_AT_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
+function parseCollectedAt(raw: string | undefined): Date | undefined {
+  if (!raw) return undefined;
+  const at = new Date(raw);
+  if (Number.isNaN(at.getTime())) {
+    throw new AppError(400, "collected_at is not a valid date and time");
+  }
+  const now = Date.now();
+  if (at.getTime() > now + COLLECTED_AT_FUTURE_SKEW_MS) {
+    throw new AppError(400, "collected_at cannot be in the future");
+  }
+  if (at.getTime() < now - COLLECTED_AT_MAX_AGE_DAYS * 86_400_000) {
+    throw new AppError(
+      400,
+      `collected_at is older than ${COLLECTED_AT_MAX_AGE_DAYS} days. Please contact your admin`,
+    );
+  }
+  return at;
+}
 
 function auditStatusChange(
   client: PoolClient,
@@ -209,130 +234,213 @@ export async function collectPayment(
   weekNumber: number,
   amountPaid: number,
   user: RequestingUser,
+  opts: CollectPaymentOptions = {},
   meta?: AuditMeta,
-): Promise<{ track: RepaymentTrackResponse; loan: Loan }> {
-  return await withTransaction(async (client) => {
-    if (amountPaid <= 0) {
-      throw new AppError(400, "Amount paid must be a positive number");
-    }
+): Promise<CollectPaymentResult> {
+  if (amountPaid <= 0) {
+    throw new AppError(400, "Amount paid must be a positive number");
+  }
+  const collectedAt = parseCollectedAt(opts.collectedAt);
 
-    const loan = await LoanRepository.findLoanByIdForUpdateRepo(client, loanId);
-    if (!loan) {
-      throw new AppError(404, "Loan not found");
-    }
-    // use the transaction's client: a second pool connection here can starve the pool
-    await assertLoanAccess(loan, user, client);
-
-    if (loan.status !== "ACTIVE" && loan.status !== "OVERDUE") {
-      throw new AppError(
-        400,
-        `Cannot collect payment on a ${loan.status.toLowerCase()} loan`,
-      );
-    }
-
-    const collectedBefore = await LoanRepository.sumTotalCollectedForLoanRepo(
-      client,
-      loanId,
+  try {
+    return await withTransaction((client) =>
+      collectPaymentTx(client, loanId, weekNumber, amountPaid, user, opts, collectedAt, meta),
     );
-    const outstanding = loan.total_payable_amount - collectedBefore;
-    if (amountPaid > outstanding) {
-      throw new AppError(
-        400,
-        `Amount exceeds the outstanding balance of ${outstanding}`,
-      );
+  } catch (error) {
+    // Same key sent for two different loans at the same moment: the loan locks
+    // don't serialise them, so the unique index catches the second one.
+    if (
+      (error as { code?: string; constraint?: string }).code === PG_UNIQUE_VIOLATION_ERROR_CODE &&
+      (error as { constraint?: string }).constraint === "payments_idempotency_key_uidx"
+    ) {
+      throw new AppError(409, "This request key was already used for a different payment");
     }
+    throw error;
+  }
+}
 
-    const weekIsPastTerm = weekNumber > loan.total_weeks;
-    const track = await LoanRepository.findOrCreateTrackForUpdateRepo(
+async function collectPaymentTx(
+  client: PoolClient,
+  loanId: string,
+  weekNumber: number,
+  amountPaid: number,
+  user: RequestingUser,
+  opts: CollectPaymentOptions,
+  collectedAt: Date | undefined,
+  meta?: AuditMeta,
+): Promise<CollectPaymentResult> {
+  const loan = await LoanRepository.findLoanByIdForUpdateRepo(client, loanId);
+  if (!loan) {
+    throw new AppError(404, "Loan not found");
+  }
+  // use the transaction's client: a second pool connection here can starve the pool
+  await assertLoanAccess(loan, user, client);
+
+  // The loan row is locked, so two requests with the same key run one after the
+  // other and the second one finds the first one's payment here.
+  if (opts.idempotencyKey) {
+    const prior = await LoanRepository.findPaymentByKeyRepo(
       client,
-      loanId,
-      weekNumber,
-      loan.weekly_payable_amount,
-      weekIsPastTerm,
-    );
-
-    const newTotalCollected = track.total_collected + amountPaid;
-    const status =
-      newTotalCollected >= track.target_amount
-        ? "PAID"
-        : newTotalCollected > 0
-          ? "PARTIAL"
-          : "UNPAID";
-
-    const updateTrack =
-      await LoanRepository.updateRepaymentTrackAfterPaymentRepo(
-        client,
-        track.id,
-        newTotalCollected,
-        status,
-      );
-
-    const payment = await LoanRepository.insertPaymentRepo(
-      client,
-      track.id,
-      loanId,
-      amountPaid,
       user.id,
+      opts.idempotencyKey,
     );
-
-    const remainingBalance = Math.max(
-      updateTrack.target_amount - updateTrack.total_collected,
-      0,
-    );
-
-    await recordAudit(client, {
-      action: AUDIT.PAYMENT_RECORDED,
-      actor_id: user.id,
-      entity_type: "LOAN",
-      entity_id: loanId,
-      owning_admin_id: loan.owning_admin_id,
-      old_value: {
-        week_total_collected: track.total_collected,
-        week_status: track.status,
-      },
-      new_value: {
-        payment_id: payment.id,
-        week_number: weekNumber,
-        amount_paid: amountPaid,
-        week_total_collected: updateTrack.total_collected,
-        week_status: updateTrack.status,
-        remaining_balance: remainingBalance,
-      },
-      meta: { ...meta, past_term_week: weekIsPastTerm },
-    });
-
-    const totalCollectedForLoan =
-      await LoanRepository.sumTotalCollectedForLoanRepo(client, loanId);
-
-    let updatedLoan = loan;
-    if (totalCollectedForLoan >= loan.total_payable_amount) {
-      await LoanRepository.updateLoanStatusRepo(client, loanId, "PAID_OFF");
-      await LoanRepository.setLoanClosedAtRepo(client, loanId);
-      updatedLoan = { ...loan, status: "PAID_OFF", closed_at: new Date() };
-      await auditStatusChange(
-        client,
+    if (prior) {
+      if (
+        prior.loan_id !== loanId ||
+        prior.week_number !== weekNumber ||
+        prior.amount_paid !== amountPaid
+      ) {
+        throw new AppError(
+          409,
+          "This request key was already used for a different payment",
+        );
+      }
+      // same request again: change nothing, return the current state
+      const track = await LoanRepository.findTrackByIdRepo(client, prior.track_id);
+      return {
+        track: {
+          ...track,
+          remaining_balance: Math.max(track.target_amount - track.total_collected, 0),
+        },
         loan,
-        user.id,
-        { status: "PAID_OFF", closed_at: updatedLoan.closed_at ?? null },
-        { ...meta, source: "PAYMENT_COLLECTED" },
-      );
-    } else if (loan.status === "ACTIVE" && weekIsPastTerm) {
-      await LoanRepository.updateLoanStatusRepo(client, loanId, "OVERDUE");
-      updatedLoan = { ...loan, status: "OVERDUE" };
-      await auditStatusChange(
-        client,
-        loan,
-        user.id,
-        { status: "OVERDUE", closed_at: loan.closed_at ?? null },
-        { ...meta, source: "PAYMENT_COLLECTED" },
-      );
+        replayed: true,
+        flags: [],
+      };
     }
+  }
 
-    return {
-      track: { ...updateTrack, remaining_balance: remainingBalance },
-      loan: updatedLoan,
-    };
+  if (collectedAt && collectedAt.getTime() < new Date(loan.issued_at).getTime()) {
+    throw new AppError(400, "collected_at is before the loan was issued");
+  }
+
+  if (loan.status !== "ACTIVE" && loan.status !== "OVERDUE") {
+    throw new AppError(
+      400,
+      `Cannot collect payment on a ${loan.status.toLowerCase()} loan`,
+    );
+  }
+
+  const collectedBefore = await LoanRepository.sumTotalCollectedForLoanRepo(
+    client,
+    loanId,
+  );
+  const outstanding = loan.total_payable_amount - collectedBefore;
+  if (amountPaid > outstanding) {
+    throw new AppError(
+      400,
+      `Amount exceeds the outstanding balance of ${outstanding}`,
+    );
+  }
+
+  const weekIsPastTerm = weekNumber > loan.total_weeks;
+  const track = await LoanRepository.findOrCreateTrackForUpdateRepo(
+    client,
+    loanId,
+    weekNumber,
+    loan.weekly_payable_amount,
+    weekIsPastTerm,
+  );
+
+  // Clashes are accepted (the money was collected) but flagged for review.
+  const flags: string[] = [];
+  if (track.status === "PAID") flags.push("WEEK_ALREADY_PAID");
+  if (
+    (await LoanRepository.countOtherCollectorPaymentsRepo(client, track.id, user.id)) > 0
+  ) {
+    flags.push("OTHER_COLLECTOR_THIS_WEEK");
+  }
+
+  const newTotalCollected = track.total_collected + amountPaid;
+  const status =
+    newTotalCollected >= track.target_amount
+      ? "PAID"
+      : newTotalCollected > 0
+        ? "PARTIAL"
+        : "UNPAID";
+
+  const updateTrack = await LoanRepository.updateRepaymentTrackAfterPaymentRepo(
+    client,
+    track.id,
+    newTotalCollected,
+    status,
+  );
+
+  const payment = await LoanRepository.insertPaymentRepo(
+    client,
+    track.id,
+    loanId,
+    amountPaid,
+    user.id,
+    { idempotencyKey: opts.idempotencyKey, collectedAt, flags },
+  );
+
+  const remainingBalance = Math.max(
+    updateTrack.target_amount - updateTrack.total_collected,
+    0,
+  );
+
+  await recordAudit(client, {
+    action: AUDIT.PAYMENT_RECORDED,
+    actor_id: user.id,
+    entity_type: "LOAN",
+    entity_id: loanId,
+    owning_admin_id: loan.owning_admin_id,
+    old_value: {
+      week_total_collected: track.total_collected,
+      week_status: track.status,
+    },
+    new_value: {
+      payment_id: payment.id,
+      week_number: weekNumber,
+      amount_paid: amountPaid,
+      week_total_collected: updateTrack.total_collected,
+      week_status: updateTrack.status,
+      remaining_balance: remainingBalance,
+    },
+    meta: {
+      ...meta,
+      past_term_week: weekIsPastTerm,
+      collected_at: collectedAt?.toISOString() ?? null,
+      idempotency_key: opts.idempotencyKey ?? null,
+      flags,
+    },
   });
+
+  const totalCollectedForLoan = await LoanRepository.sumTotalCollectedForLoanRepo(
+    client,
+    loanId,
+  );
+
+  let updatedLoan = loan;
+  if (totalCollectedForLoan >= loan.total_payable_amount) {
+    await LoanRepository.updateLoanStatusRepo(client, loanId, "PAID_OFF");
+    await LoanRepository.setLoanClosedAtRepo(client, loanId);
+    updatedLoan = { ...loan, status: "PAID_OFF", closed_at: new Date() };
+    await auditStatusChange(
+      client,
+      loan,
+      user.id,
+      { status: "PAID_OFF", closed_at: updatedLoan.closed_at ?? null },
+      { ...meta, source: "PAYMENT_COLLECTED" },
+    );
+  } else if (loan.status === "ACTIVE" && weekIsPastTerm) {
+    await LoanRepository.updateLoanStatusRepo(client, loanId, "OVERDUE");
+    updatedLoan = { ...loan, status: "OVERDUE" };
+    await auditStatusChange(
+      client,
+      loan,
+      user.id,
+      { status: "OVERDUE", closed_at: loan.closed_at ?? null },
+      { ...meta, source: "PAYMENT_COLLECTED" },
+    );
+  }
+
+  return {
+    track: { ...updateTrack, remaining_balance: remainingBalance },
+    loan: updatedLoan,
+    replayed: false,
+    flags,
+  };
 }
 
 export async function getLoanById(

@@ -14,6 +14,7 @@ import {
   PaymentWithWeek,
   CollectionDueRow,
   LoanDetailRow,
+  InsertPaymentOptions,
 } from "../../types/loanTypes";
 
 export async function createLoanRepo(
@@ -119,14 +120,24 @@ export async function insertPaymentRepo(
   loanId: string,
   amountPaid: number,
   collectedByAdminId: string,
+  opts: InsertPaymentOptions = {},
 ): Promise<Payment> {
   const result = await client.query(
     `
-      INSERT INTO payments (track_id, loan_id, amount_paid, collected_by_admin_id)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO payments
+        (track_id, loan_id, amount_paid, collected_by_admin_id, paid_at, idempotency_key, flags)
+      VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, now()), $6, $7::text[])
       RETURNING *
     `,
-    [trackId, loanId, amountPaid, collectedByAdminId],
+    [
+      trackId,
+      loanId,
+      amountPaid,
+      collectedByAdminId,
+      opts.collectedAt ?? null,
+      opts.idempotencyKey ?? null,
+      opts.flags ?? [],
+    ],
   );
 
   return result.rows[0];
@@ -164,6 +175,57 @@ export async function sumTotalCollectedForLoanRepo(
 
   return result.rows[0].total;
 }
+/** A payment this collector already saved with this key (a retried request). */
+export async function findPaymentByKeyRepo(
+  client: PoolClient,
+  userId: string,
+  key: string,
+): Promise<{
+  id: string;
+  loan_id: string;
+  track_id: string;
+  amount_paid: number;
+  week_number: number;
+} | null> {
+  const result = await client.query(
+    `
+      SELECT p.id, p.loan_id, p.track_id, p.amount_paid, t.week_number
+      FROM payments p
+      JOIN repayment_tracks t ON t.id = p.track_id
+      WHERE p.collected_by_admin_id = $1 AND p.idempotency_key = $2
+    `,
+    [userId, key],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function findTrackByIdRepo(
+  client: PoolClient,
+  trackId: string,
+): Promise<RepaymentTrack> {
+  const result = await client.query(
+    `SELECT * FROM repayment_tracks WHERE id = $1`,
+    [trackId],
+  );
+  return result.rows[0];
+}
+
+/** Payments on this week by someone other than `userId` (for the clash flag). */
+export async function countOtherCollectorPaymentsRepo(
+  client: PoolClient,
+  trackId: string,
+  userId: string,
+): Promise<number> {
+  const result = await client.query(
+    `
+      SELECT COUNT(*)::int AS n FROM payments
+      WHERE track_id = $1 AND collected_by_admin_id IS DISTINCT FROM $2
+    `,
+    [trackId, userId],
+  );
+  return result.rows[0].n;
+}
+
 // End of single transaction functions
 
 export async function findLoanByIdRepo(loanId: string): Promise<Loan | null> {

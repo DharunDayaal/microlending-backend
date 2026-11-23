@@ -56,14 +56,42 @@ export interface RepaymentTrackResponse extends RepaymentTrack {
   remaining_balance: number;
 }
 
+export interface InsertPaymentOptions {
+  idempotencyKey?: string | null;
+  /** when the money was collected (device time); defaults to now() */
+  collectedAt?: Date | null;
+  flags?: string[];
+}
+
 export interface Payment {
   id: string;
   track_id: string;
   loan_id: string;
   amount_paid: number;
   collected_by_admin_id: string;
+  /** when the money was collected (device time if the app sent it) */
   paid_at: Date;
+  idempotency_key: string | null;
+  /** when the server received it */
+  received_at: Date;
+  flags: string[];
 }
+
+export type CollectPaymentOptions = {
+  /** from the Idempotency-Key header (a UUID the app makes once per payment) */
+  idempotencyKey?: string;
+  /** ISO time the money was collected, from the device */
+  collectedAt?: string;
+};
+
+export type CollectPaymentResult = {
+  track: RepaymentTrackResponse;
+  loan: Loan;
+  /** true when this was a retry of a payment that was already saved */
+  replayed: boolean;
+  /** review flags, e.g. WEEK_ALREADY_PAID, OTHER_COLLECTOR_THIS_WEEK */
+  flags: string[];
+};
 
 export interface LoanWithSummary extends Loan {
   total_collected: number;

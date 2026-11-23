@@ -15,6 +15,8 @@ export const createLoanSchema = z.object({
 export const collectPaymentSchema = z.object({
   week_number: z.number().int().positive(),
   amount_paid: z.number().int(),
+  /** when the money was collected, from the device (ISO 8601 with offset) */
+  collected_at: z.iso.datetime({ offset: true }).optional(),
 });
 
 export const listLoansQuerySchema = z.object({

@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { z } from "zod";
 import {
   PG_FOREIGN_KEY_VIOLATION_ERROR_CODE,
   PG_UNIQUE_VIOLATION_ERROR_CODE,
@@ -15,7 +16,6 @@ import { CreateLoanPayload } from "../../types/loanTypes";
 import * as LoanService from "../../services/loanService";
 import * as AuthRepository from "../../repositories/authRepo";
 import { auditContext } from "../../services/auditService";
-import { getLimitsRepo } from "../../repositories/profileRepo";
 
 const percentOf = (amount: number, percent: number) =>
   Math.round((amount * percent) / 100);
@@ -126,17 +126,35 @@ export async function collectPayment(
   next: NextFunction,
 ) {
   try {
-    const { week_number, amount_paid } = req.body as CollectPaymentSchema;
+    const { week_number, amount_paid, collected_at } =
+      req.body as CollectPaymentSchema;
+
+    const idempotencyKey = req.header("Idempotency-Key");
+    if (
+      idempotencyKey !== undefined &&
+      !z.uuid().safeParse(idempotencyKey).success
+    ) {
+      throw new AppError(400, "Idempotency-Key must be a UUID");
+    }
 
     const response = await LoanService.collectPayment(
       req.params.loanId,
       week_number,
       amount_paid,
       req.user!,
+      { idempotencyKey, collectedAt: collected_at },
       auditContext(req),
     );
 
-    successResponse(201, res, response, "Payment collected successfully");
+    // a retry of a payment that was already saved is a 200, a new payment a 201
+    successResponse(
+      response.replayed ? 200 : 201,
+      res,
+      response,
+      response.replayed
+        ? "Payment was already recorded"
+        : "Payment collected successfully",
+    );
   } catch (error) {
     next(error);
   }
