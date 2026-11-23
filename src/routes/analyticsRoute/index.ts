@@ -14,7 +14,7 @@ import {
   superGeographyQuerySchema,
   superLeaderboardQuerySchema,
   superLimitQuerySchema,
-  superRangeQuerySchema,
+  superAdminsPerformanceQuerySchema,
   superSplitTrendQuerySchema,
   superTrendQuerySchema,
   trendQuerySchema,
@@ -151,7 +151,7 @@ analyticsRouter.get(
 analyticsRouter.get("/super-admin/overview", C.platformOverview);
 analyticsRouter.get(
   "/super-admin/admins/performance",
-  validateQuery(superRangeQuerySchema),
+  validateQuery(superAdminsPerformanceQuerySchema),
   C.adminsPerformance,
 );
 analyticsRouter.get(

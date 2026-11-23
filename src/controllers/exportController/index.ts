@@ -11,6 +11,7 @@ import {
 import {
   createExportSchema,
   exportIdParamSchema,
+  listExportsQuerySchema,
 } from "../../schemas/exportSchema";
 
 type Handler = (req: Request, res: Response) => Promise<void>;
@@ -39,8 +40,23 @@ export const createExport = wrap(async (req, res) => {
 });
 
 export const listExports = wrap(async (req, res) => {
-  const exports = await Service.listMyExports(req.user!);
-  successResponse(200, res, { exports }, "Exports fetched successfully");
+  const parsed = listExportsQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw new AppError(
+      400,
+      parsed.error.issues.map((i) => i.message).join(", "),
+    );
+  }
+  const { rows, metadata } = await Service.listMyExports(
+    req.user!,
+    parsed.data,
+  );
+  successResponse(
+    200,
+    res,
+    { exports: rows, metadata },
+    "Exports fetched successfully",
+  );
 });
 
 export const getExport = wrap(async (req, res) => {

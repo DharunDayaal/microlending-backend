@@ -5,6 +5,7 @@ import { validateQuery } from "../../middleware/validateQuery";
 import * as C from "../../controllers/profileController";
 import {
   listAdminsQuerySchema,
+  sessionsQuerySchema,
   statsQuerySchema,
   teamQuerySchema,
 } from "../../schemas/profileSchema";
@@ -18,7 +19,7 @@ meRouter.get("/", C.getMe);
 meRouter.patch("/", C.updateMe);
 meRouter.post("/phone", C.changePhone);
 meRouter.post("/password", C.changePassword);
-meRouter.get("/sessions", C.listSessions);
+meRouter.get("/sessions", validateQuery(sessionsQuerySchema), C.listSessions);
 meRouter.delete("/sessions", C.revokeAllSessions);
 meRouter.delete("/sessions/:id", C.revokeSession);
 meRouter.get("/stats", validateQuery(statsQuerySchema), C.getStats);

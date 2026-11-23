@@ -103,14 +103,16 @@ export async function findExportRepo(id: string): Promise<ExportRow | null> {
   return (r.rows[0] as ExportRow) ?? null;
 }
 
+/** Fetches limit + 1 rows (see pageFromExtraRow). */
 export async function listExportsRepo(
   userId: string,
   limit: number,
+  offset: number,
 ): Promise<ExportRow[]> {
   const r = await getPool().query(
     `SELECT ${COLS} FROM exports WHERE requested_by = $1
-      ORDER BY created_at DESC LIMIT $2`,
-    [userId, limit],
+      ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
+    [userId, limit + 1, offset],
   );
   return r.rows as ExportRow[];
 }

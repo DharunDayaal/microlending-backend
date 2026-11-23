@@ -18,6 +18,7 @@ import type {
   ChangePasswordSchema,
   ChangePhoneSchema,
   ListAdminsQuerySchema,
+  SessionsQuerySchema,
   StatsQuerySchema,
   TeamQuerySchema,
   UpdateDefaultsSchema,
@@ -25,6 +26,7 @@ import type {
   UpdateProfileSchema,
 } from "../../schemas/profileSchema";
 import { calculateTotalWeeks } from "../../utils";
+import { pageFromExtraRow, pageOffset } from "../../utils/pagination";
 import { recordAudit, changedValues } from "../auditService";
 import { AUDIT } from "../../constants/auditActions";
 
@@ -220,8 +222,12 @@ export async function changePassword(
   });
 }
 
-export async function listSessions(user: RequestingUser) {
-  return Repo.listSessionsRepo(user.id);
+export async function listSessions(
+  user: RequestingUser,
+  q: SessionsQuerySchema,
+) {
+  const rows = await Repo.listSessionsRepo(user.id, q.limit, pageOffset(q));
+  return pageFromExtraRow(rows, q);
 }
 
 export async function revokeSession(
@@ -493,18 +499,29 @@ export async function getTeam(user: RequestingUser, q: TeamQuerySchema) {
   }
 
   if (adminId) {
-    const members = await Repo.listMembersRepo(adminId);
+    // counted separately: one page of members can't tell how many are pending
+    const [members, pendingCount] = await Promise.all([
+      Repo.listMembersRepo(adminId, q.limit, pageOffset(q)),
+      Repo.countPendingMembersRepo(adminId),
+    ]);
+    const page = pageFromExtraRow(members, q);
     return {
-      members,
-      pending_count: members.filter((m) => !m.is_verified).length,
+      members: page.rows,
+      pending_count: pendingCount,
+      metadata: page.metadata,
     };
   }
 
   const [teams, pendingAdmins] = await Promise.all([
-    Repo.listTeamsRepo(),
+    Repo.listTeamsRepo(q.limit, pageOffset(q)),
     Repo.countPendingAdminsRepo(),
   ]);
-  return { teams, pending_admin_approvals: pendingAdmins };
+  const page = pageFromExtraRow(teams, q);
+  return {
+    teams: page.rows,
+    pending_admin_approvals: pendingAdmins,
+    metadata: page.metadata,
+  };
 }
 
 // admin approval (SUPER_ADMIN)

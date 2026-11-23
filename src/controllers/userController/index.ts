@@ -1,8 +1,12 @@
 import type { Request, Response, NextFunction } from "express";
-import { CreateUserSchema, updateUserSchema } from "../../schemas/userSchema";
+import {
+  CreateUserSchema,
+  CustomerSubListQuery,
+  updateUserSchema,
+  WeekdayUsersQuery,
+} from "../../schemas/userSchema";
 import * as UserService from "../../services/userService";
 import { AppError, failureResponse, successResponse } from "../../helpers";
-import { Week } from "../../types/userTypes";
 import {
   PG_FOREIGN_KEY_VIOLATION_ERROR_CODE,
   PG_UNIQUE_VIOLATION_ERROR_CODE,
@@ -61,49 +65,15 @@ export async function getUsersOnWeekday(
   next: NextFunction,
 ) {
   try {
-    if (!req.query.week || typeof req.query.week !== "string") {
-      failureResponse(400, res, "Weekday is required");
-      return;
-    }
-
-    const weekday = req.query.week as Week;
-
-    const page =
-      typeof req.query.page === "string"
-        ? parseInt(req.query.page, 10) || 1
-        : 1;
-    const limit =
-      typeof req.query.limit === "string"
-        ? parseInt(req.query.limit, 10) || 10
-        : 10;
-
-    const search = req.query.search as string;
-    const startIndex = (page - 1) * limit;
-
-    const payload = {
-      page,
-      limit: limit + 1,
-      startIndex,
-      weekday,
-      search,
-    };
-
-    const users = await UserService.getUsersOnWeekday(payload, req.user!);
-
-    const totalUsersLength = users.length;
-
-    const hasNextPage = totalUsersLength > limit;
-
-    if (hasNextPage) {
-      users.pop();
-    }
+    const q = res.locals.query as WeekdayUsersQuery;
+    const { rows, metadata } = await UserService.getUsersOnWeekday(
+      { weekday: q.week, search: q.search, page: q.page, limit: q.limit },
+      req.user!,
+    );
     successResponse(
       200,
       res,
-      {
-        users,
-        metadata: { current_page: page, limit, has_next_page: hasNextPage },
-      },
+      { users: rows, metadata },
       "Users retrieved successfully",
     );
   } catch (error) {
@@ -150,8 +120,17 @@ export async function getUserLoans(
 ) {
   try {
     const { userId } = req.params;
-    const loans = await UserService.getUserLoans(userId, req.user!);
-    successResponse(200, res, { loans }, "User loans retrieved successfully");
+    const { rows, metadata } = await UserService.getUserLoans(
+      userId,
+      req.user!,
+      res.locals.query as CustomerSubListQuery,
+    );
+    successResponse(
+      200,
+      res,
+      { loans: rows, metadata },
+      "User loans retrieved successfully",
+    );
   } catch (error) {
     next(error);
   }
@@ -164,11 +143,15 @@ export async function getUserReferrals(
 ) {
   try {
     const { userId } = req.params;
-    const referrals = await UserService.getUserReferrals(userId, req.user!);
+    const { rows, metadata } = await UserService.getUserReferrals(
+      userId,
+      req.user!,
+      res.locals.query as CustomerSubListQuery,
+    );
     successResponse(
       200,
       res,
-      { referrals },
+      { referrals: rows, metadata },
       "User referrals retrieved successfully",
     );
   } catch (error) {

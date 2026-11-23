@@ -1,5 +1,11 @@
 import { Router } from "express";
-import { createUserSchema, listUsersQuerySchema, updateUserSchema } from "../../schemas/userSchema";
+import {
+  createUserSchema,
+  customerSubListQuerySchema,
+  listUsersQuerySchema,
+  updateUserSchema,
+  weekdayUsersQuerySchema,
+} from "../../schemas/userSchema";
 import { validateBody } from "../../middleware/validateBody";
 import * as UserController from "../../controllers/userController";
 import { validateQuery } from "../../middleware/validateQuery";
@@ -12,14 +18,14 @@ userRouter.post(
   UserController.createUser,
 );
 userRouter.get("/today-summary", UserController.getTodayDashboardSummary);
-userRouter.get("/weekday", UserController.getUsersOnWeekday);
+userRouter.get("/weekday", validateQuery(weekdayUsersQuerySchema), UserController.getUsersOnWeekday);
 userRouter.get("/list", validateQuery(listUsersQuerySchema), UserController.listUsers);
 userRouter.get("/:id", UserController.getUserById);
 userRouter.patch(
   "/update/:userId",
   UserController.updateUser,
 );
-userRouter.get("/referrals/:userId", UserController.getUserReferrals);
-userRouter.get("/loans/:userId", UserController.getUserLoans);
+userRouter.get("/referrals/:userId", validateQuery(customerSubListQuerySchema), UserController.getUserReferrals);
+userRouter.get("/loans/:userId", validateQuery(customerSubListQuerySchema), UserController.getUserLoans);
 
 export default userRouter;

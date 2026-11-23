@@ -13,6 +13,7 @@ import {
 } from "../../schemas/profileSchema";
 import type {
   ListAdminsQuerySchema,
+  SessionsQuerySchema,
   StatsQuerySchema,
   TeamQuerySchema,
 } from "../../schemas/profileSchema";
@@ -73,8 +74,16 @@ export const changePassword = wrap(async (req, res) => {
 });
 
 export const listSessions = wrap(async (req, res) => {
-  const sessions = await Service.listSessions(req.user!);
-  successResponse(200, res, { sessions }, "Sessions fetched successfully");
+  const { rows, metadata } = await Service.listSessions(
+    req.user!,
+    q<SessionsQuerySchema>(res),
+  );
+  successResponse(
+    200,
+    res,
+    { sessions: rows, metadata },
+    "Sessions fetched successfully",
+  );
 });
 
 export const revokeSession = wrap(async (req, res) => {

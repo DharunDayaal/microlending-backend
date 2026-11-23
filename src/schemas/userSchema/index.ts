@@ -1,4 +1,5 @@
 import z from "zod";
+import { paginationShape } from "../../utils/pagination";
 
 
 export const createUserSchema = z.object({
@@ -25,6 +26,19 @@ export const listUsersQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
 });
 
+export const weekdayUsersQuerySchema = z.object({
+  week: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'], {
+    message: "week must be a weekday, e.g. MONDAY",
+  }),
+  search: z.string().trim().min(1).optional(),
+  ...paginationShape(10),
+});
+
+/** loans / referrals of one customer */
+export const customerSubListQuerySchema = z.object({ ...paginationShape() });
+
 export type CreateUserSchema = z.infer<typeof createUserSchema>;
 export type UpdateUserSchema = z.infer<typeof updateUserSchema>;
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
+export type WeekdayUsersQuery = z.infer<typeof weekdayUsersQuerySchema>;
+export type CustomerSubListQuery = z.infer<typeof customerSubListQuerySchema>;
