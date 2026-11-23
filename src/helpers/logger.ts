@@ -8,4 +8,16 @@ export const logger = pino({
 
 export const httpLogger = pinoHttp({
   logger,
+  // never write credentials to the logs
+  redact: {
+    paths: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      'req.headers["x-vercel-oidc-token"]',
+      'req.headers["x-vercel-proxy-signature"]',
+      "req.headers.forwarded",
+      'res.headers["set-cookie"]',
+    ],
+    censor: "[REDACTED]",
+  },
 });
