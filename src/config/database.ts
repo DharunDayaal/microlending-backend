@@ -21,7 +21,7 @@ function buildPoolConfig(connectionString: string): PoolConfig {
 
     // Each serverless instance gets its own pool, and Supavisor (port 6543)
     // multiplexes them, so keep per-instance pools small there.
-    max: intFromEnv("DB_POOL_MAX", IS_SERVERLESS ? 5 : 20),
+    max: intFromEnv("DB_POOL_MAX", IS_SERVERLESS ? 10 : 20),
     min: 0,
 
     // Close idle clients quickly. On Vercel a frozen lambda's sockets are
@@ -32,7 +32,7 @@ function buildPoolConfig(connectionString: string): PoolConfig {
     ),
 
     // Fail fast instead of waiting forever for a connection (default is 0 = never).
-    connectionTimeoutMillis: intFromEnv("DB_CONNECTION_TIMEOUT_MS", 5_000),
+    connectionTimeoutMillis: intFromEnv("DB_CONNECTION_TIMEOUT_MS", 10_000),
 
     // Recycle connections periodically so stale or half-open sockets don't pile up.
     maxLifetimeSeconds: intFromEnv("DB_MAX_LIFETIME_SECONDS", 300),
