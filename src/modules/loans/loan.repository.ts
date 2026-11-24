@@ -1,0 +1,494 @@
+import { Pool, PoolClient } from "pg";
+import { getPool } from "../../config/database";
+import {
+  CreateLoanPayload,
+  Loan,
+  LoanStatus,
+  RepaymentTrack,
+  Payment,
+  PaymentStatus,
+  ListLoansFilters,
+  LoanListRow,
+  Weekday,
+  ActiveLoanRow,
+  PaymentWithWeek,
+  CollectionDueRow,
+  LoanDetailRow,
+  InsertPaymentOptions,
+} from "./loan.types";
+
+export async function createLoanRepo(
+  payload: CreateLoanPayload,
+  client: Pool | PoolClient = getPool(),
+): Promise<Loan> {
+  const result = await client.query(
+    `
+        INSERT INTO loans (customer_id, issued_by_admin_id, owning_admin_id, nominal_amount, upfront_fee, disbursed_amount, total_payable_amount, weekly_payable_amount, total_months, total_weeks, issued_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING *
+      `,
+    [
+      payload.customer_id,
+      payload.issued_by_admin_id,
+      payload.owning_admin_id,
+      payload.nominal_amount,
+      payload.upfront_fee,
+      payload.disbursed_amount,
+      payload.total_payable_amount,
+      payload.weekly_payable_amount,
+      payload.total_months,
+      payload.total_weeks,
+      payload.issued_at,
+    ],
+  );
+  return result.rows[0];
+}
+
+// Runs on single transaction
+export async function findLoanByIdForUpdateRepo(
+  client: PoolClient,
+  loanId: string,
+): Promise<Loan | null> {
+  const result = await client.query(
+    `
+    SELECT * FROM loans WHERE id = $1 FOR UPDATE
+    `,
+    [loanId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function updateLoanStatusRepo(
+  client: PoolClient,
+  loanId: string,
+  status: LoanStatus,
+): Promise<void> {
+  await client.query(
+    `
+      UPDATE loans SET status = $1 WHERE id = $2
+    `,
+    [status, loanId],
+  );
+}
+
+export async function findOrCreateTrackForUpdateRepo(
+  client: PoolClient,
+  loanId: string,
+  weekNumber: number,
+  targetAmount: number,
+  isOverdued: boolean,
+): Promise<RepaymentTrack> {
+  const inserted = await client.query(
+    `
+      INSERT INTO repayment_tracks (loan_id, week_number, target_amount, is_overdued)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (loan_id, week_number) DO NOTHING
+      RETURNING *
+    `,
+    [loanId, weekNumber, targetAmount, isOverdued],
+  );
+
+  if (inserted.rows[0]) {
+    return inserted.rows[0];
+  }
+
+  const existing = await client.query(
+    `
+      SELECT * FROM repayment_tracks
+      WHERE loan_id = $1 AND week_number = $2 FOR UPDATE
+    `,
+    [loanId, weekNumber],
+  );
+
+  return existing.rows[0];
+}
+
+export async function findActiveLoanByCustomerIdRepo(
+  customerId: string,
+): Promise<Loan | null> {
+  const result = await getPool().query<Loan>(
+    `SELECT * FROM loans WHERE customer_id = $1 AND status IN ('ACTIVE', 'OVERDUE') LIMIT 1`,
+    [customerId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function insertPaymentRepo(
+  client: PoolClient,
+  trackId: string,
+  loanId: string,
+  amountPaid: number,
+  collectedByAdminId: string,
+  opts: InsertPaymentOptions = {},
+): Promise<Payment> {
+  const result = await client.query(
+    `
+      INSERT INTO payments
+        (track_id, loan_id, amount_paid, collected_by_admin_id, paid_at, idempotency_key, flags)
+      VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, now()), $6, $7::text[])
+      RETURNING *
+    `,
+    [
+      trackId,
+      loanId,
+      amountPaid,
+      collectedByAdminId,
+      opts.collectedAt ?? null,
+      opts.idempotencyKey ?? null,
+      opts.flags ?? [],
+    ],
+  );
+
+  return result.rows[0];
+}
+
+export async function updateRepaymentTrackAfterPaymentRepo(
+  client: PoolClient,
+  trackId: string,
+  newTotalCollected: number,
+  status: PaymentStatus,
+): Promise<RepaymentTrack> {
+  const result = await client.query(
+    `
+      UPDATE repayment_tracks SET total_collected = $1, status = $2
+      WHERE id = $3
+      RETURNING *
+    `,
+    [newTotalCollected, status, trackId],
+  );
+
+  return result.rows[0];
+}
+
+export async function sumTotalCollectedForLoanRepo(
+  client: PoolClient,
+  loanId: string,
+): Promise<number> {
+  const result = await client.query(
+    `
+      SELECT COALESCE(SUM(total_collected), 0)::int AS total FROM repayment_tracks
+      WHERE loan_id = $1
+    `,
+    [loanId],
+  );
+
+  return result.rows[0].total;
+}
+/** A payment this collector already saved with this key (a retried request). */
+export async function findPaymentByKeyRepo(
+  client: PoolClient,
+  userId: string,
+  key: string,
+): Promise<{
+  id: string;
+  loan_id: string;
+  track_id: string;
+  amount_paid: number;
+  week_number: number;
+} | null> {
+  const result = await client.query(
+    `
+      SELECT p.id, p.loan_id, p.track_id, p.amount_paid, t.week_number
+      FROM payments p
+      JOIN repayment_tracks t ON t.id = p.track_id
+      WHERE p.collected_by_admin_id = $1 AND p.idempotency_key = $2
+    `,
+    [userId, key],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function findTrackByIdRepo(
+  client: PoolClient,
+  trackId: string,
+): Promise<RepaymentTrack> {
+  const result = await client.query(
+    `SELECT * FROM repayment_tracks WHERE id = $1`,
+    [trackId],
+  );
+  return result.rows[0];
+}
+
+/** Payments on this week by someone other than `userId` (for the clash flag). */
+export async function countOtherCollectorPaymentsRepo(
+  client: PoolClient,
+  trackId: string,
+  userId: string,
+): Promise<number> {
+  const result = await client.query(
+    `
+      SELECT COUNT(*)::int AS n FROM payments
+      WHERE track_id = $1 AND collected_by_admin_id IS DISTINCT FROM $2
+    `,
+    [trackId, userId],
+  );
+  return result.rows[0].n;
+}
+
+// End of single transaction functions
+
+export async function findLoanByIdRepo(loanId: string): Promise<Loan | null> {
+  const result = await getPool().query(
+    `
+      SELECT * FROM loans WHERE id = $1
+    `,
+    [loanId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function getLoanTotalsRepo(
+  loanId: string,
+  client: Pool | PoolClient = getPool(),
+): Promise<{
+  total_collected: number;
+  paid_weeks: number;
+  partial_weeks: number;
+}> {
+  const result = await client.query(
+    `
+      SELECT
+        COALESCE(SUM(total_collected), 0)::int AS total_collected,
+        COUNT(*) FILTER (WHERE status = 'PAID')::int AS paid_weeks,
+        COUNT(*) FILTER (WHERE status = 'PARTIAL')::int AS partial_weeks
+      FROM repayment_tracks
+      WHERE loan_id = $1
+    `,
+    [loanId],
+  );
+
+  return result.rows[0];
+}
+
+export async function findLoanWithDetailsRepo(
+  id: string,
+): Promise<LoanDetailRow | null> {
+  const result = await getPool().query(
+    `
+      SELECT
+        l.*,
+        COALESCE(t.total_collected, 0)::int AS total_collected,
+        COALESCE(t.paid_weeks, 0)::int AS paid_weeks,
+        COALESCE(t.partial_weeks, 0)::int AS partial_weeks,
+        COALESCE(t.tracks, '[]'::json) AS tracks
+      FROM loans l
+      LEFT JOIN LATERAL (
+        SELECT
+          SUM(rt.total_collected) AS total_collected,
+          COUNT(*) FILTER (WHERE rt.status = 'PAID') AS paid_weeks,
+          COUNT(*) FILTER (WHERE rt.status = 'PARTIAL') AS partial_weeks,
+          json_agg(rt.* ORDER BY rt.week_number) AS tracks
+        FROM repayment_tracks rt
+        WHERE rt.loan_id = l.id
+      ) t ON true
+      WHERE l.id = $1
+    `,
+    [id],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function listTracksByLoanIdRepo(
+  loanId: string,
+): Promise<RepaymentTrack[]> {
+  const result = await getPool().query(
+    `
+      SELECT * FROM repayment_tracks WHERE loan_id = $1 ORDER BY week_number ASC
+    `,
+    [loanId],
+  );
+
+  return result.rows;
+}
+
+export async function listLoansRepo(
+  filters: ListLoansFilters,
+): Promise<{ rows: Omit<LoanListRow, "total">[]; total: number }> {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (filters.status) {
+    values.push(filters.status);
+    conditions.push(`l.status = $${values.length}`);
+  }
+  if (filters.customer_id) {
+    values.push(filters.customer_id);
+    conditions.push(`l.customer_id = $${values.length}`);
+  }
+  if (filters.search) {
+    values.push(`%${filters.search.trim()}%`);
+    conditions.push(
+      `(u.customer_name ILIKE $${values.length} OR u.phone_number ILIKE $${values.length})`,
+    );
+  }
+  if (filters.issued_from) {
+    values.push(filters.issued_from);
+    conditions.push(`l.issued_at >= $${values.length}`);
+  }
+  if (filters.issued_to) {
+    values.push(filters.issued_to);
+    conditions.push(`l.issued_at <= $${values.length}`);
+  }
+  if (filters.owning_admin_id) {
+    values.push(filters.owning_admin_id);
+    conditions.push(`l.owning_admin_id = $${values.length}`);
+  }
+  if (filters.customer_created_by) {
+    values.push(filters.customer_created_by);
+    conditions.push(`u.created_by = $${values.length}`);
+  }
+
+  const whereClause = conditions.length
+    ? `WHERE ${conditions.join(" AND ")}`
+    : "";
+  const offset = (filters.page - 1) * filters.limit;
+  const listValues = [...values, filters.limit, offset];
+
+  const result = await getPool().query(
+    `
+      SELECT
+        l.*,
+        u.customer_name,
+        u.phone_number,
+        COALESCE((SELECT SUM(rt.total_collected) FROM repayment_tracks rt WHERE rt.loan_id = l.id), 0)::int AS total_collected,
+        COUNT(*) OVER()::int AS total
+      FROM loans l
+      JOIN customers u ON u.id = l.customer_id
+      ${whereClause}
+      ORDER BY l.issued_at DESC
+      LIMIT $${listValues.length - 1} OFFSET $${listValues.length}
+    `,
+    listValues,
+  );
+
+  const total = result.rows[0]?.total ?? 0;
+  const rows = result.rows.map(({ total: _total, ...row }) => row);
+  return { rows, total };
+}
+
+export async function listCollectionsDueRepo(
+  page: number,
+  limit: number,
+  preferredPaymentDay?: Weekday,
+  scope: { owningAdminId?: string; createdBy?: string } = {},
+): Promise<{
+  rows: CollectionDueRow[];
+  total: number;
+  summary: {
+    total_customers: number;
+    active_loans: number;
+    overdue_loans: number;
+    referred_customers: number;
+  };
+}> {
+  const values: unknown[] = [];
+  let dayFilter = "";
+
+  if (preferredPaymentDay) {
+    values.push(preferredPaymentDay);
+    dayFilter = `AND u.preferred_payment_day = $1`;
+  }
+  if (scope.owningAdminId) {
+    values.push(scope.owningAdminId);
+    dayFilter += ` AND l.owning_admin_id = $${values.length}`;
+  }
+  if (scope.createdBy) {
+    values.push(scope.createdBy);
+    dayFilter += ` AND u.created_by = $${values.length}`;
+  }
+
+  const summaryValues = [...values];
+  const offset = (page - 1) * limit;
+  values.push(limit, offset);
+  const limitIndex = values.length - 1;
+  const offsetIndex = values.length;
+
+  const result = await getPool().query(
+    `
+      SELECT
+        l.*,
+        u.customer_name,
+        u.phone_number,
+        u.preferred_payment_day,
+        COALESCE(t.total_collected, 0)::int AS total_collected,
+        COALESCE(t.tracks, '[]'::json) AS tracks,
+        COUNT(*) OVER()::int AS total
+      FROM loans l
+      JOIN customers u ON u.id = l.customer_id
+      LEFT JOIN LATERAL (
+        SELECT
+          SUM(rt.total_collected) AS total_collected,
+          json_agg(rt.* ORDER BY rt.week_number) AS tracks
+        FROM repayment_tracks rt
+        WHERE rt.loan_id = l.id
+      ) t ON true
+      WHERE l.status IN ('ACTIVE', 'OVERDUE') ${dayFilter}
+      ORDER BY u.preferred_payment_day, u.customer_name
+      LIMIT $${limitIndex} OFFSET $${offsetIndex}
+    `,
+    values,
+  );
+
+  const total = result.rows[0]?.total ?? 0;
+  const rows = result.rows.map(({ total: _total, ...row }) => row);
+  const summaryResult = await getPool().query(
+    `
+      SELECT
+        COUNT(DISTINCT u.id)::int AS total_customers,
+        COUNT(*) FILTER (WHERE l.status = 'ACTIVE')::int AS active_loans,
+        COUNT(*) FILTER (WHERE l.status = 'OVERDUE')::int AS overdue_loans,
+        COUNT(DISTINCT u.id) FILTER (WHERE u.referred_by_id IS NOT NULL)::int AS referred_customers
+      FROM loans l
+      JOIN customers u ON u.id = l.customer_id
+      WHERE l.status IN ('ACTIVE', 'OVERDUE') ${dayFilter}
+    `,
+    summaryValues,
+  );
+
+  return { rows, total, summary: summaryResult.rows[0] };
+}
+
+export async function listPaymentsByLoanIdRepo(
+  loanId: string,
+  page: number,
+  limit: number,
+): Promise<{ rows: PaymentWithWeek[]; total: number }> {
+  const offset = (page - 1) * limit;
+
+  const result = await getPool().query(
+    `
+      SELECT p.*, rt.week_number, COUNT(*) OVER()::int AS total
+      FROM payments p
+      JOIN repayment_tracks rt ON rt.id = p.track_id
+      WHERE p.loan_id = $1
+      ORDER BY p.paid_at DESC
+      LIMIT $2 OFFSET $3
+    `,
+    [loanId, limit, offset],
+  );
+
+  const total = result.rows[0]?.total ?? 0;
+  const rows = result.rows.map(({ total: _total, ...row }) => row);
+  return { rows, total };
+}
+
+export async function setLoanClosedAtRepo(
+  client: PoolClient,
+  loanId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE loans SET closed_at = now() WHERE id = $1 AND closed_at IS NULL`,
+    [loanId],
+  );
+}
+
+export async function clearLoanClosedAtRepo(
+  client: PoolClient,
+  loanId: string,
+): Promise<void> {
+  await client.query(`UPDATE loans SET closed_at = NULL WHERE id = $1`, [
+    loanId,
+  ]);
+}
