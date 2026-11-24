@@ -1,6 +1,6 @@
 import { Pool, PoolClient, PoolConfig } from "pg";
 import { DATABASE_URL } from "./env";
-import { logger } from "../helpers";
+import { logger } from "../shared/logger";
 
 let pool: Pool | null = null;
 
