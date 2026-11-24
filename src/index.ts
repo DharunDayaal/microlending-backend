@@ -16,6 +16,10 @@ import reportRouter from "./routes/reportRoute";
 import { getPool, warmPool } from "./config/database";
 import { rbacAuth } from "./middleware/rbacAuth";
 import { apiRateLimitConfig } from "./middleware/rateLimiter";
+import {
+  analyticsCache,
+  clearAnalyticsCacheOnWrite,
+} from "./middleware/analyticsCache";
 import analyticsRouter from "./routes/analyticsRoute";
 import { adminsRouter, meRouter, settingsRouter } from "./routes/profileRoute";
 import employeeRouter from "./routes/employeeRoute";
@@ -71,16 +75,25 @@ if (SET_RATE_LIMIT === "true") {
   app.use(apiRateLimitConfig);
 }
 
+app.use(clearAnalyticsCacheOnWrite);
+
 app.use("/api/auth", authRouter);
 app.use("/api/users", rbacAuth, userRouter);
 app.use("/api/loans", rbacAuth, loanRouter);
 app.use("/api/reports", rbacAuth, reportRouter);
-app.use("/api/analytics", rbacAuth, analyticsRouter);
+// One mount for both analytics routers so auth runs once per request, then the
+// short-lived response cache (see middleware/analyticsCache).
+app.use(
+  "/api/analytics",
+  rbacAuth,
+  analyticsCache,
+  analyticsRouter,
+  analyticsAdvancedRouter,
+);
 app.use("/api/me", rbacAuth, meRouter);
 app.use("/api/admins", rbacAuth, adminsRouter);
 app.use("/api/settings", rbacAuth, settingsRouter);
 app.use("/api/employees", rbacAuth, employeeRouter);
-app.use("/api/analytics", rbacAuth, analyticsAdvancedRouter);
 app.use("/api/audit-logs", rbacAuth, auditRouter);
 app.use("/api/internal/exports", exportWorkerRouter);
 app.use("/api/exports", rbacAuth, exportRouter);
